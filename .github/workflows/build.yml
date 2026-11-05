@@ -24,7 +24,7 @@ jobs:
       - run: npm run test:e2e
   macos-arm64:
     needs: frontend
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +37,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target aarch64-apple-darwin
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - name: Build unsigned Apple Silicon application
         run: npm run tauri -- build --target aarch64-apple-darwin
         env:
