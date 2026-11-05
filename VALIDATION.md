@@ -13,6 +13,7 @@ Stand: 5. November 2026. Entwicklung und Befehle ausschließlich in Codex Cloud 
 | Oberfläche | Screenshot bei 1440 px geprüft, kein horizontaler Überlauf |
 | Rust-Abhängigkeiten | Cargo.lock erstellt, macOS-ARM64-Abhängigkeiten aufgelöst |
 | Rust-Formatierung | Erfolgreich |
+| Prettier / Git-Diff-Prüfung | Erfolgreich |
 | Native Rust-Tests unter Linux | Versucht; durch fehlende GLib-/WebKitGTK-Systembibliotheken blockiert |
 | Nativer macOS-Build / DMG | Unter Linux nicht ausführbar; GitHub-Actions-Job vorgesehen |
 | Nativer Dateidialog / Asset Protocol / WKWebView | Auf macOS noch zu prüfen |
@@ -39,3 +40,7 @@ Die nativen Dialogfreigaben wurden zusätzlich gegen den Quellcode der aufgelös
 7. Langen Stream auf einem M1 mit 8 GB abspielen und Speicherbedarf/Reaktionsfähigkeit beobachten.
 
 ![Oberfläche von Phase 1](docs/preview.png)
+
+## GitHub-Status bei Übergabe
+
+Pull Request: https://github.com/bestclipper/AI-Clipper/pull/1. Bei der Statusabfrage wurde noch kein Pull-Request-Workflow-Lauf zurückgegeben. Es liegt daher noch kein bestätigtes macOS-DMG vor. Den aktuellen Laufstatus findest du unter Actions im Repository. Der Workflow wird mit diesem Pull Request zur Prüfung bereitgestellt.
