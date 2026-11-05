@@ -43,4 +43,6 @@ Die nativen Dialogfreigaben wurden zusätzlich gegen den Quellcode der aufgelös
 
 ## GitHub-Status bei Übergabe
 
-Pull Request: https://github.com/bestclipper/AI-Clipper/pull/1. Bei der Statusabfrage wurde noch kein Pull-Request-Workflow-Lauf zurückgegeben. Es liegt daher noch kein bestätigtes macOS-DMG vor. Den aktuellen Laufstatus findest du unter Actions im Repository. Der Workflow wird mit diesem Pull Request zur Prüfung bereitgestellt.
+Pull Request: https://github.com/bestclipper/AI-Clipper/pull/1.
+
+Der [GitHub-Actions-Lauf für Commit 0909d4a](https://github.com/bestclipper/AI-Clipper/actions/runs/42052077958) hat sämtliche Frontend-Prüfungen einschließlich Browsertests erfolgreich abgeschlossen. Bei der letzten Abfrage wartete der macOS-Job noch auf einen Runner (`queued`); es liegt noch kein bestätigtes macOS-DMG vor. Nachfolgende Änderungen lösen eigene Läufe aus. Aktueller Status und Artefakte stehen unter Actions im Repository. Der native Build darf bis zum erfolgreichen Abschluss nicht als getestet gelten.

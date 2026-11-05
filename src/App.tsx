@@ -21,7 +21,7 @@ import {
   OUTPUT_PROFILE,
   VIDEO_EXTENSIONS,
 } from "./pipeline";
-type Source = { name: string; url: string; blob: boolean };
+type Source = { id: number; name: string; url: string; blob: boolean };
 export default function App() {
   const [source, setSource] = useState<Source | null>(null);
   const [meta, setMeta] = useState<{
@@ -32,16 +32,17 @@ export default function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const sourceRevision = useRef(0);
   useEffect(
     () => () => {
       if (source?.blob) URL.revokeObjectURL(source.url);
     },
     [source],
   );
-  function replace(next: Source) {
+  function replace(next: Omit<Source, "id">) {
     setError("");
     setMeta(null);
-    setSource(next);
+    setSource({ ...next, id: ++sourceRevision.current });
   }
   async function importVideo() {
     if (!isTauri()) {
@@ -147,7 +148,7 @@ export default function App() {
               <div className={"preview " + (source ? "has-video" : "")}>
                 {source ? (
                   <video
-                    key={source.url}
+                    key={source.id}
                     src={source.url}
                     controls
                     playsInline
