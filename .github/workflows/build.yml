@@ -5,6 +5,9 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -23,13 +26,18 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
   media-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg from Ubuntu repositories only
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
       - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
         env:
