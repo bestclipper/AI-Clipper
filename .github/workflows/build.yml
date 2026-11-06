@@ -22,12 +22,25 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+  media-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
+      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
+        env:
+          AI_CLIPPER_TEST_FFMPEG: /usr/bin/ffmpeg
+          AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
   macos-arm64:
-    needs: frontend
+    needs: [frontend, media-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,6 +53,12 @@ jobs:
           components: rustfmt
       - run: npm ci
       - run: npm run build
+      - name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
+        run: bash scripts/build-ffmpeg-macos.sh
+      - name: Smoke-test bundled Intel FFmpeg filter graph
+        run: |
+          src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_entries format=duration -of json tests/fixtures/sample.mp4
+          src-tauri/binaries/ffmpeg-x86_64-apple-darwin -v error -xerror -threads 2 -filter_threads 1 -i tests/fixtures/sample.mp4 -t 2 -vf "scale=w='ceil(iw*sar/2)*2':h=ih,setsar=1,crop=w='floor(min(iw,ih*9/16)/2)*2':h='floor(min(ih,iw*16/9)/2)*2':x='(iw-ow)/2':y='(ih-oh)/2',scale=1080:1920:flags=bilinear,setsar=1,fps=30" -af apad -f null -
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       # Run tests on the Intel host; ARM64 test binaries cannot run here.
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
@@ -57,6 +76,12 @@ jobs:
           file "$executable_path"
           test "$(lipo -archs "$executable_path")" = "arm64"
           codesign --verify --deep --strict "$app_path"
+          for tool in ffmpeg ffprobe; do
+            test "$(lipo -archs "$app_path/Contents/MacOS/$tool")" = "arm64"
+            codesign --verify --strict "$app_path/Contents/MacOS/$tool"
+          done
+          test -s "$app_path/Contents/Resources/third-party/ffmpeg-source.tar.gz"
+          test -s "$app_path/Contents/Resources/third-party/FFmpeg-LGPL-2.1.txt"
           for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg_path"
           done

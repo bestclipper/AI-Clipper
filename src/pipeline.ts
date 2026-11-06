@@ -1,4 +1,4 @@
-/** Contract for future local workers. Phase 1 never starts processing. */
+/** Contract for future automatic workers. Phase 2 exports one manually selected test clip. */
 export const OUTPUT_PROFILE = Object.freeze({
   count: 5,
   minSeconds: 61,

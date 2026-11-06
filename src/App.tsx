@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, isTauri, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Scissors,
@@ -21,7 +21,15 @@ import {
   OUTPUT_PROFILE,
   VIDEO_EXTENSIONS,
 } from "./pipeline";
-type Source = { id: number; name: string; url: string; blob: boolean };
+import ExportPanel from "./ExportPanel";
+import type { MediaInfo } from "./export";
+type Source = {
+  id: number;
+  name: string;
+  url: string;
+  blob: boolean;
+  nativePath?: string;
+};
 export default function App() {
   const [source, setSource] = useState<Source | null>(null);
   const [meta, setMeta] = useState<{
@@ -30,6 +38,9 @@ export default function App() {
     height: number;
   } | null>(null);
   const [error, setError] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [nativeMedia, setNativeMedia] = useState<MediaInfo | null>(null);
+  const video = useRef<HTMLVideoElement>(null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const sourceRevision = useRef(0);
@@ -42,6 +53,7 @@ export default function App() {
   function replace(next: Omit<Source, "id">) {
     setError("");
     setMeta(null);
+    setNativeMedia(null);
     setSource({ ...next, id: ++sourceRevision.current });
   }
   async function importVideo() {
@@ -66,7 +78,16 @@ export default function App() {
           name: path.split(/[\\/]/).pop() || "Video",
           url: convertFileSrc(path),
           blob: false,
+          nativePath: path,
         });
+        try {
+          const info = await invoke<MediaInfo>("probe_source", {
+            sourcePath: path,
+          });
+          setNativeMedia(info);
+        } catch (e) {
+          setError(`FFmpeg-Importprüfung: ${String(e)}`);
+        }
       }
     } catch {
       setError(
@@ -99,7 +120,7 @@ export default function App() {
           </p>
         </div>
         <div className="device">
-          <span className="dot" /> Apple Silicon <small>Phase 1 · v0.1.0</small>
+          <span className="dot" /> Apple Silicon <small>Phase 2 · v0.2.0</small>
         </div>
       </aside>
       <main>
@@ -121,7 +142,7 @@ export default function App() {
               <p>Importiere deinen Stream und entdecke, was drinsteckt.</p>
             </div>
             <span className="phase">
-              PHASE 01 <span>Import & Vorschau</span>
+              PHASE 02 <span>Lokaler Videoschnitt</span>
             </span>
           </div>
           <div className="steps">
@@ -132,7 +153,7 @@ export default function App() {
               <b>2</b> KI-Analyse <small>Später</small>
             </div>
             <div className="step">
-              <b>3</b> Clips exportieren <small>Später</small>
+              <b>3</b> Testclip exportieren
             </div>
           </div>
           <div className="editor-grid">
@@ -148,6 +169,7 @@ export default function App() {
               <div className={"preview " + (source ? "has-video" : "")}>
                 {source ? (
                   <video
+                    ref={video}
                     key={source.id}
                     src={source.url}
                     controls
@@ -190,7 +212,7 @@ export default function App() {
                       <br />
                       Es wird nichts hochgeladen.
                     </p>
-                    <button onClick={importVideo} disabled={busy}>
+                    <button onClick={importVideo} disabled={busy || exportBusy}>
                       <Upload size={16} />{" "}
                       {busy ? "Wird geöffnet …" : "Video auswählen"}
                     </button>
@@ -220,15 +242,17 @@ export default function App() {
                     <button
                       className="secondary"
                       onClick={importVideo}
-                      disabled={busy}
+                      disabled={busy || exportBusy}
                     >
                       Ändern
                     </button>
                     <button
                       className="icon-button"
                       aria-label="Video entfernen"
+                      disabled={exportBusy}
                       onClick={() => {
                         setSource(null);
+                        setNativeMedia(null);
                         setMeta(null);
                         setError("");
                       }}
@@ -281,8 +305,8 @@ export default function App() {
               <div className="info">
                 <Sparkles size={18} />
                 <p>
-                  Dein Zielprofil für Phase 2. Automatische Verarbeitung kommt
-                  später.
+                  Das Zielprofil für die spätere KI-Auswahl. Einzelne Abschnitte
+                  kannst du jetzt unten exportieren.
                 </p>
               </div>
               <button className="generate" disabled>
@@ -290,6 +314,16 @@ export default function App() {
               </button>
             </aside>
           </div>
+          <ExportPanel
+            key={source?.id ?? 0}
+            sourcePath={source?.nativePath}
+            media={
+              nativeMedia ??
+              (source?.blob && meta ? { ...meta, hasAudio: false } : null)
+            }
+            currentTime={() => video.current?.currentTime ?? 0}
+            onBusy={setExportBusy}
+          />
           {error && (
             <div role="alert" className="error">
               {error}
@@ -343,7 +377,8 @@ export default function App() {
                 {
                   icon: Download,
                   title: "Bereit zum Teilen",
-                  text: "Fünf MP4s im 9:16-Hochkantformat.",
+                  text: "Ein Testclip als vertikale MP4 exportieren.",
+                  ready: true,
                 },
               ].map((item) => (
                 <article key={item.title}>
