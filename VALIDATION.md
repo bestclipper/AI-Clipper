@@ -46,3 +46,11 @@ Die nativen Dialogfreigaben wurden zusätzlich gegen den Quellcode der aufgelös
 Pull Request: https://github.com/bestclipper/AI-Clipper/pull/1.
 
 Der [GitHub-Actions-Lauf für Commit 0909d4a](https://github.com/bestclipper/AI-Clipper/actions/runs/42052077958) hat sämtliche Frontend-Prüfungen einschließlich Browsertests erfolgreich abgeschlossen. Bei der letzten Abfrage wartete der macOS-Job noch auf einen Runner (`queued`); es liegt noch kein bestätigtes macOS-DMG vor. Nachfolgende Änderungen lösen eigene Läufe aus. Aktueller Status und Artefakte stehen unter Actions im Repository. Der native Build darf bis zum erfolgreichen Abschluss nicht als getestet gelten.
+
+## Runner-Wechsel · 6. November 2026
+
+Der Lauf [42052702679](https://github.com/bestclipper/AI-Clipper/actions/runs/42052702679) hat das Frontend erfolgreich geprüft; der macOS-Job wurde ohne ausgeführte Schritte abgebrochen. Die gemeldeten Kapazitäts-/Runner-Zuteilungsfehler entstehen vor dem Kompilieren.
+
+Der Workflow verwendet jetzt den Standard-Runner `macos-15-intel`. Das öffentliche Repository darf diesen laut GitHub kostenlos verwenden. Rust-Tests laufen auf der Intel-Hostarchitektur, die veröffentlichte App wird weiterhin explizit für `aarch64-apple-darwin` gebaut. Vor dem Upload werden die ARM64-Architektur, Ad-hoc-Signatur und DMG-Integrität geprüft. Die native ARM64-App wird auf dem Intel-Runner nicht ausgeführt. Kostenpflichtige größere Runner sind nicht konfiguriert.
+
+Quellen und Begründung stehen im Abschnitt „Warum ein Intel-Runner?“ der README. Das Ergebnis des neuen GitHub-Laufs wird im bestehenden Pull Request #1 dokumentiert.

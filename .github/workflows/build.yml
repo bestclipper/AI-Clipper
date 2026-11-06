@@ -24,7 +24,10 @@ jobs:
       - run: npm run test:e2e
   macos-arm64:
     needs: frontend
-    runs-on: macos-15
+    # Standard Intel runner: free for this public repository.
+    # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
+    runs-on: macos-15-intel
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,11 +41,25 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      # Run tests on the Intel host; ARM64 test binaries cannot run here.
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
-      - name: Build unsigned Apple Silicon application
+      - name: Build ad-hoc signed Apple Silicon application
         run: npm run tauri -- build --target aarch64-apple-darwin
         env:
           APPLE_SIGNING_IDENTITY: "-"
+      - name: Verify ARM64 app and disk image
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/AI Clipper.app"
+          executable_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")
+          executable_path="$app_path/Contents/MacOS/$executable_name"
+          file "$executable_path"
+          test "$(lipo -archs "$executable_path")" = "arm64"
+          codesign --verify --deep --strict "$app_path"
+          for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
+            hdiutil verify "$dmg_path"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: AI-Clipper-macOS-ARM64
