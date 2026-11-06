@@ -1,56 +1,53 @@
-# Prüfbericht · Phase 1
+# Prüfbericht · Phase 2 (v0.2.0)
 
-Stand: 5. November 2026. Entwicklung und Befehle ausschließlich in Codex Cloud (Debian Linux x86_64).
+Entwicklung und Befehle ausschließlich in Codex Cloud. Phase 1 wurde vom Nutzer auf dem MacBook Air M1 mit 8 GB erfolgreich getestet: App-Start, Import und Vorschau.
+
+## In Codex Cloud ausgeführt
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| Unit-Tests (`npm test`) | 5 erfolgreich |
-| TypeScript + Produktionsbuild (`npm run build`) | Erfolgreich |
-| Browser-Integrationstests | 2 erfolgreich mit vorinstalliertem Chromium |
-| Echte Videowiedergabe | Erfolgreich, H.264/AAC-Testvideo |
-| Import, Metadaten, erneuter Import, Entfernen | Erfolgreich im Browser |
-| Nicht unterstützte Datei und beschädigtes MP4 | Fehlertexte erfolgreich geprüft |
-| Oberfläche | Screenshot bei 1440 px geprüft, kein horizontaler Überlauf |
-| Rust-Abhängigkeiten | Cargo.lock erstellt, macOS-ARM64-Abhängigkeiten aufgelöst |
-| Rust-Formatierung | Erfolgreich |
-| Prettier / Git-Diff-Prüfung | Erfolgreich |
-| Native Rust-Tests unter Linux | Versucht; durch fehlende GLib-/WebKitGTK-Systembibliotheken blockiert |
-| Nativer macOS-Build / DMG | Unter Linux nicht ausführbar; GitHub-Actions-Job vorgesehen |
-| Nativer Dateidialog / Asset Protocol / WKWebView | Auf macOS noch zu prüfen |
-| Installation / Gatekeeper / M1 mit 8 GB | Auf echtem Mac noch zu prüfen |
+| TypeScript und Vite-Produktionsbuild | erfolgreich |
+| Frontend-Unit-Tests | 7 erfolgreich |
+| Browser-Integrationstests | 5 erfolgreich mit installiertem Chromium |
+| Rust-Medienkern-Unit-Tests | 2 erfolgreich |
+| Echte FFmpeg-Integrationstests | 2 erfolgreich, explizit mit `--include-ignored` |
+| Rust-Formatierung, Prettier, Shellsyntax und Git-Diff-Prüfung | erfolgreich |
+| Vollständige native Tauri-App / ARM64-DMG | Prüfung durch neuen macOS-CI-Lauf; Ergebnis im Pull Request |
 
-Der Playwright-Browserdownload ist in dieser Cloud-Umgebung per Netzwerkregel gesperrt (HTTP 403). Die Tests wurden deshalb mit dem bereits installierten Chromium ausgeführt:
+Die Browsertests decken weiterhin Import, Wiedergabe, Dateiwechsel und Fehler ab. Neue UI-Vertragstests simulieren die Tauri-Brücke für Fortschritt, Sperren der Eingaben, Fehler, Ordnerdialog-Abbruch und Export-Abbruch. **Sie führen selbst kein FFmpeg aus**.
+
+Die getrennten Rust-Integrationstests führen echtes FFmpeg/FFprobe unter Linux aus: synthetische 63-Sekunden-Quellen mit und ohne AAC-Ton, Landschafts- und Hochkantformat, Zuschnitt auf 1080 × 1920, 61-Sekunden-H.264-Export, Metadatenprüfung und vollständige Dekodierung. Zusätzlich werden Fortschritt, Abbruch eines laufenden Prozesses, Bereinigung, beschädigte Dateien, ungültige Zeitbereiche, Dateinamen mit Leerzeichen und Schutz vorhandener Dateien geprüft. Linux verwendet den Softwareencoder libx264 zum Testen. Die ausgelieferte App verwendet VideoToolbox und enthält keinen libx264-Encoder.
+
+Befehle in dieser Cloud:
 
 ```sh
+npm test
+npm run build
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e
+AI_CLIPPER_TEST_FFMPEG=/usr/bin/ffmpeg AI_CLIPPER_TEST_FFPROBE=/usr/bin/ffprobe \
+  cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
 ```
 
-GitHub Actions installiert seinen eigenen Chromium und verwendet den Standard-Testbefehl. Das kleine Testvideo unter `tests/fixtures/sample.mp4` wurde synthetisch mit FFmpeg erzeugt (3 Sekunden, 320 × 180, H.264/AAC). Es ist kein Leistungsnachweis für lange Streamer-Videos.
+## Verpflichtende CI-Prüfungen
 
-Die nativen Dialogfreigaben wurden zusätzlich gegen den Quellcode der aufgelösten Tauri-Dialogversion geprüft: ausgewählte Dateien werden dynamisch für das Asset Protocol freigegeben. Das ersetzt keinen macOS-Laufzeittest. Beim Entfernen eines Videos endet die Wiedergabe; die vom Dialog gewährte Dateiberechtigung bleibt bis zum Schließen der App gültig.
+- Ubuntu: Frontend-Tests, Browsertests und alle echten FFmpeg-Integrationstests.
+- macos-15-intel: FFmpeg n8.0.3 aus festgeschriebenem Commit mit verifiziertem SHA-256 bauen, Intel-/ARM64-Architekturen und Systembibliotheksabhängigkeiten prüfen.
+- Mitgelieferte Intel-Werkzeuge starten, FFprobe und den tatsächlichen Crop-/Scale-/Audiofilter mit der Testdatei prüfen, ohne einen VM-Hardwareencoder vorauszusetzen.
+- Native Tauri-Kompilierung und Rust-Prüfungen auf Intel; Cross-Build für aarch64-apple-darwin.
+- App, FFmpeg und FFprobe müssen reine ARM64-Binaries und ad-hoc signiert sein. Die vollständigen FFmpeg-Quellen und Lizenzdateien müssen in der App liegen. DMG-Prüfsumme muss gültig sein.
 
-## Manueller macOS-Abnahmetest
+Die auf dem Intel-Runner gebauten ARM64-Werkzeuge können dort nicht ausgeführt werden. Ein erfolgreicher Build ersetzt keinen Funktionstest des VideoToolbox-Encoders, des nativen Dateidialogs und der installierten App auf einem echten M1.
 
-1. Erfolgreiches ARM64-Artefakt herunterladen, DMG öffnen und Anwendung nach Programme ziehen.
-2. Anwendung über Finder starten; eventuelle Gatekeeper-Freigabe über Systemeinstellungen prüfen.
-3. MP4 (H.264/AAC) auswählen, Metadaten und Wiedergabe inklusive Ton, Pause und Springen prüfen.
-4. Dialog abbrechen: vorhandene Quelle muss erhalten bleiben.
-5. Quelle wechseln und entfernen; beschädigte und nicht unterstützte Codecs prüfen.
-6. Bei abgeschaltetem Netzwerk erneut starten und importieren.
-7. Langen Stream auf einem M1 mit 8 GB abspielen und Speicherbedarf/Reaktionsfähigkeit beobachten.
+## Abnahme auf dem M1
 
-![Oberfläche von Phase 1](docs/preview.png)
+1. Phase-2-DMG installieren und App per Finder starten. Ohne separate FFmpeg-Installation testen.
+2. Lokalen Stream mit mindestens 90 Sekunden und Ton importieren. Einen Abschnitt ab einer Stelle ungleich 0 wählen und 61 Sekunden exportieren. Danach 90 Sekunden testen.
+3. MP4 in QuickTime abspielen: gewünschter Anfang, Originalton, 9:16-Beschnitt, Bild/Ton-Synchronität und vollständiges Ende prüfen.
+4. Stumme, bereits vertikale und gedrehte Quellen prüfen. Der mittige Beschnitt ist beabsichtigt; es gibt noch kein intelligentes Reframing.
+5. Fortschrittsanzeige und Verifikationsphase prüfen. Während des Exports dürfen Quelle und Zeitauswahl nicht gewechselt werden.
+6. Export abbrechen und App danach erneut verwenden. Exportordnerdialog abbrechen. Nicht beschreibbaren/vollen Datenträger prüfen.
+7. Während eines Exports schließen/beenden: zunächst muss abgebrochen und bereinigt werden; anschließend App erneut schließen.
+8. Ohne Internet erneut exportieren. Originaldatei und vorhandene Exporte müssen unverändert bleiben.
+9. Langen hochauflösenden Stream unter Beobachtung des Arbeitsspeichers auf dem M1 mit 8 GB prüfen. Es wird nur ein Exportprozess gestartet; ein empirischer RAM-Höchstwert ist noch nicht nachgewiesen.
 
-## GitHub-Status bei Übergabe
-
-Pull Request: https://github.com/bestclipper/AI-Clipper/pull/1.
-
-Der [GitHub-Actions-Lauf für Commit 0909d4a](https://github.com/bestclipper/AI-Clipper/actions/runs/42052077958) hat sämtliche Frontend-Prüfungen einschließlich Browsertests erfolgreich abgeschlossen. Bei der letzten Abfrage wartete der macOS-Job noch auf einen Runner (`queued`); es liegt noch kein bestätigtes macOS-DMG vor. Nachfolgende Änderungen lösen eigene Läufe aus. Aktueller Status und Artefakte stehen unter Actions im Repository. Der native Build darf bis zum erfolgreichen Abschluss nicht als getestet gelten.
-
-## Runner-Wechsel · 6. November 2026
-
-Der Lauf [42052702679](https://github.com/bestclipper/AI-Clipper/actions/runs/42052702679) hat das Frontend erfolgreich geprüft; der macOS-Job wurde ohne ausgeführte Schritte abgebrochen. Die gemeldeten Kapazitäts-/Runner-Zuteilungsfehler entstehen vor dem Kompilieren.
-
-Der Workflow verwendet jetzt den Standard-Runner `macos-15-intel`. Das öffentliche Repository darf diesen laut GitHub kostenlos verwenden. Rust-Tests laufen auf der Intel-Hostarchitektur, die veröffentlichte App wird weiterhin explizit für `aarch64-apple-darwin` gebaut. Vor dem Upload werden die ARM64-Architektur, Ad-hoc-Signatur und DMG-Integrität geprüft. Die native ARM64-App wird auf dem Intel-Runner nicht ausgeführt. Kostenpflichtige größere Runner sind nicht konfiguriert.
-
-Quellen und Begründung stehen im Abschnitt „Warum ein Intel-Runner?“ der README. Das Ergebnis des neuen GitHub-Laufs wird im bestehenden Pull Request #1 dokumentiert.
+Bei erzwungenem Prozessabbruch/Stromausfall kann eine unvollständige Ausgabe liegen bleiben. Ein solches Ergebnis hat keine erfolgreiche Abschlussprüfung erhalten.

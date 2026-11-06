@@ -5,3 +5,8 @@ src-tauri/gen/
 playwright-report/
 test-results/
 .DS_Store
+crates/media-core/target/
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+src-tauri/third-party/*
+!src-tauri/third-party/.gitkeep

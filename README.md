@@ -1,84 +1,90 @@
-# AI Clipper · Phase 1
+# AI Clipper · Phase 2
 
-Kostenlose lokale macOS-Anwendung für Apple Silicon, entwickelt mit **Tauri 2, React und TypeScript**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
+Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
 
-## Was funktioniert bereits?
+## Was funktioniert?
 
-- Dark-Mode-Oberfläche mit lokalem Dateiauswahldialog.
-- Import einer MP4-, MOV-, M4V- oder WebM-Datei ohne Upload oder Kopie.
-- Video-Vorschau mit Wiedergabe/Pause, Zeitleiste, Lautstärke und Vollbild über die Player-Steuerung.
-- Anzeige von Dateiname, Dauer und Videoauflösung.
-- Video wechseln oder entfernen; verständliche Fehlermeldungen.
-- Vorbereitung einer lokalen Verarbeitungspipeline mit abbrechbarer Analyse-/Export-Schnittstelle.
+- Lokaler Videoimport und Player mit Dauer und Auflösung.
+- Ein Testclip mit frei wählbarem Start und **61–90 Sekunden** Länge.
+- Automatischer **mittiger 9:16-Bildausschnitt**, skaliert auf **1080 × 1920 Pixel**, 30 fps.
+- MP4 mit **H.264 und AAC**, Originalton bleibt erhalten; eine stumme Quelle bleibt stumm.
+- Fortschrittsanzeige, Abbruch und automatische Prüfung vor der Erfolgsmeldung.
 
-**Noch nicht enthalten:** KI-Szenenauswahl, Transkription, Untertitel, Hochkant-Konvertierung und MP4-Export. Die Schaltfläche „5 Clips erstellen“ ist deshalb deaktiviert. Das Clip-Profil zeigt die spätere Zielkonfiguration, keine bereits erzeugten Clips. Es gibt keine manuelle Szenenauswahl.
+**Später:** automatische Auswahl der fünf besten Szenen, intelligentes Reframing, englische Untertitel, fünf Exporte in einem Durchlauf und Link-Import. In Phase 2 wählst du zum Testen einen einzelnen Abschnitt aus. Der Button „5 Clips erstellen“ bleibt deaktiviert.
 
-## Auf deinem Mac installieren – ohne Terminal
+## Installieren – ohne Terminal
 
-1. Öffne im GitHub-Repository den Reiter **Actions** und den neuesten erfolgreichen Lauf von **Validate and build macOS ARM64**. Für einen ersten Test kannst du auch den Lauf des Pull Requests verwenden.
-2. Lade unten unter **Artifacts** das Archiv **AI-Clipper-macOS-ARM64** herunter (GitHub-Anmeldung erforderlich; Artefakte bleiben 14 Tage verfügbar).
-3. Entpacke das ZIP im Finder und öffne die enthaltene `.dmg`-Datei.
-4. Ziehe **AI Clipper** nach **Programme** und starte die App dort.
-5. Klicke **Video auswählen** und wähle eine lokale Datei. Anschließend kannst du das Video direkt ansehen.
+1. Öffne [GitHub Actions](https://github.com/bestclipper/AI-Clipper/actions) und den neuesten erfolgreichen Lauf von **Validate and build macOS ARM64** (auch der neue Phase-2-Pull-Request hat eigene Läufe).
+2. Lade **AI-Clipper-macOS-ARM64** unter **Artifacts** herunter. GitHub-Anmeldung erforderlich; Downloads bleiben 14 Tage verfügbar.
+3. Entpacke das ZIP im Finder, öffne die DMG und ziehe **AI Clipper** nach **Programme**. Beende eine ältere Version, bevor du sie ersetzt.
+4. Starte AI Clipper. Du brauchst **keine separate FFmpeg-, Homebrew-, Node- oder Rust-Installation**.
 
-Du brauchst dafür weder Node.js, Rust, Homebrew noch FFmpeg auf deinem Mac zu installieren.
+Die App ist ad-hoc signiert, aber ohne Apple Developer ID und nicht notarisiert. macOS kann den ersten Start blockieren. Nutze nach einem Startversuch gegebenenfalls **Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen**. Auf verwalteten Macs kann das gesperrt sein. Gatekeeper muss nicht pauschal deaktiviert werden.
 
-### macOS-Sicherheitshinweis
+## Einen Testclip erstellen
 
-Der kostenlose Build ist **ad-hoc signiert, aber nicht mit einer Apple Developer ID signiert und nicht notarisiert**. macOS kann den ersten Start blockieren. Öffne nach dem ersten Startversuch **Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen**, falls macOS diese Option anbietet, und bestätige den Start. Öffne nur einen Build aus diesem Repository, dessen Herkunft du geprüft hast. Falls dein macOS oder eine Geräteverwaltung das Öffnen weiterhin verhindert, ist die Installation dort ohne eine andere Verteilungs-/Signierungslösung nicht garantiert. Eine pauschal deaktivierte Gatekeeper-Prüfung ist nicht erforderlich. Eine reibungslose notarisierten Verteilung würde eine kostenpflichtige Apple-Mitgliedschaft erfordern und gehört nicht zu diesem kostenlosen Aufbau.
+1. **Video auswählen**: lokale MP4-, MOV-, M4V- oder WebM-Datei importieren. Für die Vorschau wird MP4 mit H.264/AAC empfohlen.
+2. Unter **Testclip exportieren** den Start in Sekunden eingeben. Alternativ den Player an die gewünschte Stelle bewegen und **Playerposition übernehmen** klicken.
+3. Eine Länge von **61 bis 90 Sekunden** eingeben. Der gesamte Abschnitt muss in der Quelle liegen; kürzere Quellen können nicht exportiert werden.
+4. **Abschnitt als MP4 exportieren** klicken und einen lokalen Exportordner wählen. Dialog abbrechen erzeugt keine Datei.
+5. Die App zeigt Vorbereitung, Schnitt und abschließende Prüfung. **Erst nach erfolgreicher Prüfung** erscheint die Erfolgsmeldung mit Dateipfad. Der neue Dateiname lautet `AI-Clipper-<eindeutige Nummer>.mp4`; bestehende Dateien und die Originaldatei werden nicht überschrieben.
 
-## Formate und Arbeitsspeicher
+**Abbrechen** beendet den aktiven Prozess und löscht die unvollständige Ausgabe. Während des Exports sind Dateiwechsel und Zeitauswahl gesperrt. Ein Schließ-/Beenden-Versuch bricht zunächst den Export ab und hält die App für die Bereinigung offen; danach lässt sie sich schließen. Erzwungenes Beenden oder Stromausfall kann eine unvollständige Datei hinterlassen – sie wurde dann nicht als erfolgreich bestätigt.
 
-Dateiendungen garantieren keine Codec-Unterstützung. Der macOS-Player verwendet WKWebView und die System-Codecs. **MP4 mit H.264 und AAC** ist die empfohlene Kombination. MOV/M4V/WebM hängen von Codec und macOS-Version ab; MKV/AVI werden in Phase 1 nicht angeboten. Bei inkompatiblen oder beschädigten Dateien zeigt die App eine Fehlermeldung. Phase 1 enthält keinen Konverter.
+Ein mittiger Beschnitt entfernt seitliche Bildbereiche (z. B. Chat oder Facecam); es gibt noch keine Gesichtserkennung. Die Vorschau zeigt weiterhin das Original, nicht den beschnittenen Export. Originalton bedeutet, dass die erste Tonspur inhaltlich übernommen und neu als AAC mit 192 kbit/s und 48 kHz codiert wird, keine bitgenaue Audiokopie. Falls die Tonspur vor dem Clipende endet, wird der Rest mit Stille aufgefüllt. Weitere Audio-/Untertitelspuren und Kapitel werden nicht exportiert.
 
-Das Video wird über Tauri Asset Protocol mit bedarfsgerechten Dateizugriffen abgespielt. Es wird nicht als Base64 oder vollständig in JavaScript geladen. Es ist immer nur eine Quelle aktiv, die Vorschau lädt zunächst nur Metadaten. Große Auflösungen oder hohe Bitraten können den M1 trotzdem belasten; ein RAM-/Langzeitbenchmark auf einem echten M1 mit 8 GB steht noch aus. Die importierte Quelle bleibt unverändert. Projekte werden noch nicht gespeichert; nach dem Neustart wählst du die Quelle erneut aus.
+## Automatische Exportprüfung
 
-## Datenschutz und kostenlose Technologien
+Die App liest Quelle und Ergebnis mit FFprobe. Sie prüft Dauer, Videoauflösung 1080 × 1920, quadratische Pixel, H.264, AAC bei vorhandener Quelle mit Ton und erhaltene Tonspur. Die Videodauer muss innerhalb von 0,1 Sekunden der Auswahl liegen; für die AAC-Spur gilt eine Toleranz von 0,15 Sekunden. Danach dekodiert FFmpeg den **ganzen exportierten Clip** mit Fehlerabbruch. Bei Fehler oder Abbruch wird die neue Datei gelöscht. Die Fortschrittsanzeige erreicht erst danach 100 %. Während der vollständigen Prüfung bleibt sie bei 90 %; diese Phase benötigt zusätzliche Zeit.
 
-Die gebündelte Anwendung benötigt zur Laufzeit keine Internetverbindung, API-Schlüssel oder Konten. Kein Tracking, keine Remote-Schriftarten und keine Uploads. Die Content Security Policy erlaubt lokale Inhalte und Tauri-IPC; der native Dialog gewährt Zugriff auf ausgewählte Dateien, ohne das gesamte Dateisystem pauschal freizugeben. Der Browsermodus für Entwicklung verwendet kurzlebige Blob-URLs und gibt sie beim Dateiwechsel frei.
+## Speicher und lokale Verarbeitung
 
-Tauri, React, TypeScript, Vite, Rust und Lucide sind kostenlose Open-Source-Technologien; der Anwendungscode steht unter MIT. Es werden keine kostenpflichtigen APIs verwendet. GitHub Actions ist für öffentliche Repositories mit Standard-Runnern kostenlos; private Repositories haben ein begrenztes Inklusivkontingent. Stelle bei privaten Repositories das Actions-Ausgabenlimit auf 0, wenn keinerlei Mehrkosten entstehen dürfen. Ohne verfügbares Kontingent kann der Build dann aussetzen. Es wird kein kostenpflichtiger größerer Runner verwendet.
+- Genau **ein Export gleichzeitig**, keine fünf parallelen Encoder.
+- Lesen von Festplatte statt vollständigem Laden in JavaScript; keine Base64-Videos.
+- Maximal zwei FFmpeg-Codec-Threads und ein Filter-Thread, 30 fps und begrenzte Bitrate (6 Mbit/s Ziel, maximal 8 Mbit/s).
+- Apples VideoToolbox-H.264-Encoder nutzt auf dem M1 verfügbare Hardware; die systemseitige Softwarevariante ist erlaubt, falls Hardware nicht verfügbar ist. Kein zusätzlicher Encoder-Download.
+- Begrenzte Prozesslogs; Fortschritt über Tauri-Kanäle. Prüfung erfolgt nach dem Schnitt, nicht parallel.
 
-## Entwicklung ausschließlich in Codex Cloud
+Ein tatsächlicher RAM-/Langzeitbenchmark auf dem M1 mit 8 GB bleibt nötig. Sehr hoch aufgelöste Quellen oder Codec-Sonderfälle können mehr Ressourcen benötigen. Plane freien Speicher für die Ausgabedatei und FFmpegs Faststart-Umsortierung ein. Ein 90-Sekunden-Clip liegt bei dieser Zielbitrate grob im Bereich von 70 MB; Bildinhalt und Encoder beeinflussen die tatsächliche Größe.
 
-Die folgenden Befehle sind für die **Cloud-Entwicklungsumgebung**, nicht für deinen Mac:
+Keine Cloud-API, kein Tracking und keine Videouploads. Die mitgelieferten FFmpeg-Werkzeuge sind ohne Netzwerkprotokolle gebaut. Die App erlaubt als Eingabe nur lokal importierte Dateien; das Backend prüft die Dateifreigabe erneut. FFmpeg erhält Argumente direkt, ohne Shell. Nach einem Neustart muss die Quelle erneut ausgewählt werden.
+
+## Formate und Grenzen
+
+Die Dateiendung garantiert keinen kompatiblen Codec. Der FFmpeg-Build enthält native Decoder für verbreitete H.264-/HEVC-/VP8-/VP9-Videos und gängige Audioformate, aber keine externen Codec-Bibliotheken. System-WebView und FFmpeg können unterschiedliche Formate unterstützen. Nicht unterstützte oder beschädigte Quellen erzeugen eine Fehlermeldung. DRM-geschützte Inhalte werden nicht unterstützt. Es werden keine fremden Untertitel eingebrannt und keine neuen Untertitel erzeugt.
+
+## Kostenloser macOS-ARM64-Build
+
+[Workflow](.github/workflows/build.yml): Frontend-Prüfungen und echte FFmpeg-Integrationstests laufen auf Ubuntu. Der kostenlose Standard-Runner **`macos-15-intel`** baut aus geprüftem, festgeschriebenem FFmpeg-Quellcode die Intel- und ARM64-Werkzeuge. Auf Intel werden die Werkzeuge gestartet und die Filter mit einem Testvideo geprüft; Rust-Tests laufen auf der Hostarchitektur. Tauri erzeugt anschließend die ARM64-App mit `--target aarch64-apple-darwin`.
+
+Vor dem DMG-Upload werden App, FFmpeg und FFprobe auf ARM64 und gültige Ad-hoc-Signaturen geprüft; die DMG wird mit `hdiutil verify` kontrolliert. Die App enthält außerdem FFmpeg-Quellcode und Lizenzhinweise. Ein ARM64-Laufzeittest ist auf dem Intel-Runner nicht möglich.
+
+Das Repository ist öffentlich. [GitHub listet `macos-15-intel` als kostenlosen Standard-Runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Es werden keine kostenpflichtigen größeren Runner oder APIs eingesetzt. [Tauri dokumentiert den ARM64-Cross-Build auf Intel](https://tauri.app/distribute/app-store/). Kostenlose Runner können Warteschlangen haben. Bei privaten Repositories gelten Kontingente; ein Ausgabenlimit von 0 verhindert kostenpflichtigen Mehrverbrauch.
+
+## FFmpeg und Lizenzen
+
+Die Anwendung steht unter MIT. FFmpeg n8.0.3 wird als eigenständiges Werkzeug unter LGPL 2.1 oder später mitgeliefert. GPL-/Nonfree-Komponenten und externe Codec-Bibliotheken sind deaktiviert. Quellcode, Lizenztext und exakte Build-Anleitung liegen in der installierten App unter `Contents/Resources/third-party/`. Details: [THIRD_PARTY.md](THIRD_PARTY.md). Es entstehen keine API- oder Lizenzabonnementkosten.
+
+## Entwicklung nur in Codex Cloud
+
+Die folgenden Befehle gehören in die Cloud-Entwicklungsumgebung, **nicht auf deinen Mac**:
 
 ```sh
 npm ci
 npm test
 npm run build
-npx playwright install --with-deps chromium
 npm run test:e2e
+cargo test --manifest-path crates/media-core/Cargo.toml --locked
+AI_CLIPPER_TEST_FFMPEG=/usr/bin/ffmpeg AI_CLIPPER_TEST_FFPROBE=/usr/bin/ffprobe \
+  cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
 ```
 
-`npm run dev` startet die Browser-Vorschau auf Port 1420. Der native Desktop-Dateidialog und das Asset Protocol sind nur in Tauri aktiv. Die Browser-Vorschau verwendet einen lokalen HTML-Dateidialog.
+Die echten FFmpeg-Integrationstests sind explizit markiert und werden in CI mit `--include-ignored` verpflichtend ausgeführt. Sie verwenden den Linux-Softwareencoder `libx264` ausschließlich zum Testen; dieser ist nicht in der ausgelieferten App enthalten. Die UI-Vertragstests simulieren die Tauri-Brücke und ersetzen keine native Prüfung.
 
-Für native Entwicklung in einer entsprechend ausgestatteten Cloud-Umgebung: `npm run tauri -- dev`. Unter Linux werden dafür Rust und die Tauri-Systembibliotheken (u. a. WebKitGTK 4.1) benötigt. Ein macOS-DMG lässt sich nicht vollständig unter Linux bauen; der Workflow baut auf einem macOS-Runner mit Ziel `aarch64-apple-darwin`.
+`npm run dev` bietet eine Browser-Vorschau mit Dateiimport. Ein Export ist dort deaktiviert und als Mac-App-Funktion gekennzeichnet. Für native Entwicklung müssen die jeweiligen Sidecars zuerst in der passenden Cloud-Umgebung gebaut werden; `scripts/build-ffmpeg-macos.sh` übernimmt das auf macOS. Linux kann kein vollständiges macOS-Paket erzeugen.
 
-## Automatischer ARM64-Build
+## Architektur und Prüfbericht
 
-[Workflow](.github/workflows/build.yml): Bei Pull Requests, Pushes auf `main`/`master`, `v*`-Tags und manueller Ausführung werden zuerst Frontend-Tests, TypeScript/Produktionsbuild und Browser-Integrationstests ausgeführt. Danach prüft der macOS-Job auf dem kostenlosen Standard-Runner **`macos-15-intel`** die Rust-Formatierung und führt Rust-Tests auf der Intel-Hostarchitektur aus. Mit installiertem Rust-Target `aarch64-apple-darwin` erstellt Tauri anschließend per Cross-Build `.app` und `.dmg` für Apple Silicon. Eine zusätzliche Prüfung verlangt eine reine ARM64-App (`lipo`), eine gültige Ad-hoc-Signatur und ein intaktes DMG (`hdiutil verify`). Die ARM64-App kann auf dem Intel-Runner nicht gestartet werden; der M1-Funktionstest bleibt separat erforderlich. Die DMG wird als Download-Artefakt bereitgestellt; es wird kein Release automatisch veröffentlicht. Unter **Actions → Validate and build macOS ARM64 → Run workflow** lässt sich ein abgelaufenes Artefakt neu erstellen. Erforderlich: Actions und Workflow-Ausführungen müssen im Repository erlaubt sein.
+`crates/media-core` enthält die unabhängig von Tauri testbare Prozesssteuerung, den Schnitt und die Exportprüfung. `src-tauri` prüft Dateiberechtigungen, öffnet den Exportordnerdialog und begrenzt gleichzeitige Exporte. `src/ExportPanel.tsx` bietet Auswahl, Fortschritt und Ergebnis. Die spätere automatische Fünf-Clip-Pipeline bleibt in `src/pipeline.ts` vorbereitet.
 
-## Grundlage für Phase 2
-
-`src/pipeline.ts` definiert `LocalPipeline`, `ClipCandidate`, `PipelineStage` und das unveränderliche Ausgabeprofil:
-
-| Einstellung | Ziel |
-| --- | --- |
-| Szenenwahl | automatisch, fünf unterhaltsame Highlights |
-| Clip-Länge | 61–90 Sekunden |
-| Bildformat | 9:16, 1080 × 1920 |
-| Untertitel | Englisch |
-| Export | fünf MP4-Dateien |
-
-Später können lokale Worker für z. B. whisper.cpp und FFmpeg angebunden werden. Diese sind in Phase 1 **nicht integriert** und werden nicht heruntergeladen. Modellwahl, Modelllizenzen, englische Transkription bzw. Übersetzung, Rankingqualität und CPU-/RAM-Budget müssen in Phase 2 auf dem M1 geprüft werden. Geplant ist sequenzielle Verarbeitung, damit keine fünf speicherintensiven Jobs gleichzeitig laufen. Die Schnittstelle berücksichtigt einen Abbruch über `AbortSignal`.
-
-## Prüfstatus und Grenzen
-
-Siehe [VALIDATION.md](VALIDATION.md) für die tatsächlich ausgeführten Prüfungen. Browsertests decken Import, Metadaten, echte Wiedergabe, Dateiwechsel, Entfernen und Fehlerfälle ab. Das kleine H.264/AAC-Testvideo wurde synthetisch mit FFmpeg erzeugt und enthält keine fremden Inhalte.
-
-**Wichtig:** Browsertests ersetzen keinen nativen macOS-Test. Der macOS-Dateidialog, dynamische Asset-Freigaben, WKWebView-Codecs, DMG-Installation und Gatekeeper müssen zusätzlich auf macOS geprüft werden. Ein erfolgreicher GitHub-Build belegt die Paketierung, aber keinen vollständigen Funktionstest auf einem MacBook Air M1.
-
-### Warum ein Intel-Runner?
-
-Die bisherigen ARM64-Runner-Jobs wurden wegen GitHub-Kapazitätsengpässen nicht übernommen. `macos-15-intel` verwendet einen anderen Runner-Pool. Unser Repository ist öffentlich; [GitHub listet diesen Intel-Runner unter den kostenlosen Standard-Runnern](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Es werden keine `large`-/`xlarge`-Runner und keine kostenpflichtigen Dienste verwendet. [Tauri dokumentiert den Build für Apple Silicon auf einem Intel-Mac](https://tauri.app/distribute/app-store/): Rust-Target installieren und `--target aarch64-apple-darwin` setzen. Xcode und das macOS-SDK kommen vom GitHub-Runner. Die erzeugte Anwendung läuft nativ auf dem M1, ohne dass auf deinem Mac Entwicklungswerkzeuge installiert werden müssen. Auch kostenlose Intel-Runner können Warteschlangen haben; der Wechsel garantiert keine sofortige Zuteilung.
+Tatsächlich ausgeführte Prüfungen und die M1-Abnahmeliste stehen in [VALIDATION.md](VALIDATION.md).

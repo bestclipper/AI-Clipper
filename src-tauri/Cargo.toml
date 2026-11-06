@@ -1,6 +1,6 @@
 [package]
 name = "ai-clipper"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local video workspace for Apple Silicon"
 authors = ["AI Clipper contributors"]
 edition = "2021"
@@ -16,3 +16,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+
+clipper-media = { path = "../crates/media-core" }
+serde = { version = "1", features = ["derive"] }

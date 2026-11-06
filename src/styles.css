@@ -685,3 +685,103 @@ footer span:first-child {
     line-height: 1.8;
   }
 }
+.export-panel {
+  margin-top: 24px;
+  background: #17181f;
+  border: 1px solid #2b2d36;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.export-body {
+  padding: 20px;
+}
+.export-body > p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #9da4b1;
+}
+.range-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 14px;
+  border: 0;
+  padding: 10px 0;
+  margin: 0;
+}
+.range-fields label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #c5cad4;
+}
+.range-fields input {
+  background: #101116;
+  border: 1px solid #454b58;
+  color: #f3f4f5;
+  border-radius: 7px;
+  font: inherit;
+  padding: 11px;
+  width: 170px;
+}
+.range-fields input:focus-visible {
+  outline: 2px solid #b7f56a;
+  outline-offset: 2px;
+}
+.range-fields:disabled {
+  opacity: 0.6;
+}
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.export-actions button:disabled {
+  opacity: 0.5;
+}
+.export-body .range-warning {
+  color: #e5bd7d;
+}
+.export-note {
+  font-size: 10px !important;
+}
+.export-progress {
+  margin: 20px 0;
+  color: #c8d8bb;
+  font-size: 12px;
+}
+.export-progress strong {
+  float: right;
+}
+.export-progress progress {
+  width: 100%;
+  height: 12px;
+  accent-color: #b7f56a;
+  margin: 10px 0;
+}
+.export-progress small {
+  color: #8a9382;
+}
+.export-success {
+  background: #263621;
+  border: 1px solid #567345;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 13px;
+  color: #d3f2bc;
+}
+.export-success p {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.export-success small {
+  color: #bdd0b0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
