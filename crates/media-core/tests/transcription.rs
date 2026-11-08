@@ -118,7 +118,10 @@ fn real_english_speech_timestamps_restore_chunking_and_cancel() {
     let multi = transcribe_chunked(&tools, &whisper, &root, &source, &cancel, 5., |_| {}).unwrap();
     assert!(multi.segments.iter().any(|s| s.start >= 5.));
     assert!(multi.segments.windows(2).all(|s| s[0].start <= s[1].start));
-    let saved = serde_json::to_string(&multi).unwrap();
+    let project_file = root
+        .join("projects")
+        .join(format!("{}.json", multi.source_key));
+    let saved = std::fs::read(&project_file).unwrap();
     let failed = transcribe_chunked(&tools, &whisper, &root, &source, &cancel, 5., |p| {
         if p.phase == "extracting" && p.chunk == 2 {
             cancel.store(true, Ordering::SeqCst);
@@ -126,7 +129,8 @@ fn real_english_speech_timestamps_restore_chunking_and_cancel() {
     });
     assert!(failed.is_err());
     let restored = load_transcript(&root, &source).unwrap().unwrap();
-    assert_eq!(serde_json::to_string(&restored).unwrap(), saved);
+    assert_eq!(restored.segments.len(), multi.segments.len());
+    assert_eq!(std::fs::read(&project_file).unwrap(), saved);
     assert_eq!(
         std::fs::read_dir(root.join("temporary")).unwrap().count(),
         0
