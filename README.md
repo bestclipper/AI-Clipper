@@ -14,7 +14,7 @@ kein API-Schlüssel und kein Video-Upload. Nach dem Modelldownload offline nutzb
 - **Smart Story:** 2–5 chronologische, nicht überlappende Originalabschnitte,
   zusammen 61–90 Sekunden, möglichst nahe 75 Sekunden. Erst Ereignisse in
   überlappenden Fenstern erkennen, dann globale Themen und konkrete Aussagen
-  vergleichen. Eine zweite Qwen-Abfrage muss Zusammenhang und Verständlichkeit
+  vergleichen. Eine unabhängige Faktenprüfung muss zuerst einen konkreten Zusammenhang erkennen. Die anschließende Bewertung muss Zusammenhang und Verständlichkeit
   anhand der Originalaussagen begründen. Unbelegte oder unpassende Vorschläge
   werden verworfen; zehn Treffer werden nicht erzwungen.
 - Die Liste ist nach Score sortiert. Details enthalten Originalzeiten,

@@ -117,7 +117,7 @@ jobs:
           AI_CLIPPER_TEST_QWEN_ROOT: ${{ runner.temp }}/qwen-data
           AI_CLIPPER_TEST_TRANSCRIPT: ${{ runner.temp }}/speech-fixture/real-english-transcript.json
   macos-arm64:
-    needs: [frontend, media-tests, speech-tests]
+    needs: [frontend, media-tests, speech-tests, scene-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel
@@ -134,12 +134,29 @@ jobs:
           components: rustfmt
       - run: npm ci
       - run: npm run build
-      - name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            src-tauri/binaries/*-apple-darwin
+            src-tauri/third-party/
+          key: macos-native-${{ hashFiles('scripts/build-ffmpeg-macos.sh', 'scripts/build-whisper.sh', 'scripts/build-llama.sh', 'licenses/*') }}
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
         run: bash scripts/build-ffmpeg-macos.sh
-      - name: Build static whisper.cpp with embedded Metal support
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build static whisper.cpp with embedded Metal support
         run: bash scripts/build-whisper.sh
-      - name: Build static llama.cpp with embedded Metal support
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build static llama.cpp with embedded Metal support
         run: bash scripts/build-llama.sh
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            src-tauri/binaries/*-apple-darwin
+            src-tauri/third-party/
+          key: macos-native-${{ hashFiles('scripts/build-ffmpeg-macos.sh', 'scripts/build-whisper.sh', 'scripts/build-llama.sh', 'licenses/*') }}
       - name: Smoke-test bundled Intel FFmpeg filter graph
         run: |
           src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_entries format=duration -of json tests/fixtures/sample.mp4
