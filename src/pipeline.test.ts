@@ -18,7 +18,7 @@ describe("duration display", () => {
 });
 it("keeps the future output contract explicit", () => {
   expect(OUTPUT_PROFILE).toMatchObject({
-    count: 5,
+    count: 10,
     minSeconds: 61,
     maxSeconds: 90,
     width: 1080,

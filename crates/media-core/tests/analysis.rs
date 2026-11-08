@@ -31,12 +31,23 @@ fn real_qwen_semantic_linking_and_rejection() {
         cpu_fallback_used: false,
     };
     let u = units();
-    let events = llama.detect(&u, &[0, 1, 2, 3], &[]).unwrap();
+    let mut events = Vec::new();
+    for ids in windows(&u) {
+        events.extend(llama.detect(&u, &ids, &[]).unwrap());
+    }
     println!(
         "Actual detected events: {}",
         serde_json::to_string(&events).unwrap()
     );
     assert!(!events.is_empty());
+    let separated = events.clone();
+    let generated = build_plans(&separated, &u, 240.);
+    assert!(
+        generated
+            .iter()
+            .any(|p| p.parts.len() == 2 && plan_segments(p, &u, 240.).is_ok()),
+        "actual model events must generate a valid distant Smart Story"
+    );
     let plan = Plan {
         id: "distant_77".into(),
         parts: vec![Span { first: 0, last: 0 }, Span { first: 2, last: 2 }],
@@ -71,6 +82,19 @@ fn real_qwen_semantic_linking_and_rejection() {
     let j = llama.judge(&single, &u).unwrap();
     assert!(j.ratings.valid());
     assert_eq!(plan_segments(&single, &u, 240.).unwrap()[0].duration, 70.);
+    if let Some(path) = std::env::var_os("AI_CLIPPER_TEST_TRANSCRIPT") {
+        let t: clipper_media::transcription::Transcript =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let actual = make_units(&t);
+        assert!(actual
+            .iter()
+            .any(|u| u.text.to_lowercase().contains("country")));
+        for ids in windows(&actual) {
+            let detected = llama.detect(&actual, &ids, &[]).unwrap();
+            assert!(detected.iter().all(|e| event_valid(e, &actual, &ids)));
+        }
+        println!("Actual JFK English recording -> Whisper transcript -> Qwen inference passed.");
+    }
     // A pre-cancelled inference must never launch or allocate a model.
     let cancelled = AtomicBool::new(true);
     let mut stopped = Llama {

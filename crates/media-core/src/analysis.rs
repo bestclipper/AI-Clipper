@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
@@ -200,8 +200,8 @@ impl Llama<'_> {
         ids: &[usize],
         cues: &[AudioCue],
     ) -> Result<Vec<Event>, String> {
-        let data=ids.iter().map(|id|json!({"id":id,"text":units[*id].text,"audio":audio::cue_for(&units[*id],cues)})).collect::<Vec<_>>();
-        let prompt=format!("Identify up to 3 noteworthy coherent events in this transcript window. Consider humor, surprising reversals, strong emotion, a clear promise/claim, question, conflict, reaction or payoff. Include setups even when the payoff may happen later. Do not force a highlight from routine material. First/last must be existing IDs, never seconds. Summaries and specific topic labels help link distant events. People only when explicitly named; never infer speaker changes or laughter from audio loudness. Audio RMS/rise/quiet are supporting intensity cues, not semantic facts. Give interest 1–10, a short exact source quote in evidence, concise English summary/topic/role.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let data=ids.iter().map(|id|json!({"id":id,"start":units[*id].start,"end":units[*id].end,"text":units[*id].text,"audio":audio::cue_for(&units[*id],cues)})).collect::<Vec<_>>();
+        let prompt=format!("Identify up to 3 noteworthy coherent events in this transcript window. Consider humor, surprising reversals, strong emotion, a clear promise/claim, question, conflict, reaction or payoff. Include setups even when the payoff may happen later. Do not force a highlight from routine material. Each event must be at most 150 seconds. Keep distinct setup and payoff as separate events, even within one window. First/last must be existing IDs, never seconds. Summaries and specific topic labels help link distant events. People only when explicitly named; never infer speaker changes or laughter from audio loudness. Audio RMS/rise/quiet are supporting intensity cues, not semantic facts. Give interest 1–10, a short exact source quote in evidence, concise English summary/topic/role.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Output {
@@ -382,5 +382,86 @@ mod tests {
             serde_json::from_reader(fs::File::open(path(root.path(), "test")).unwrap()).unwrap();
         assert_eq!(got.next_window, 4);
         assert!(!got.complete);
+    }
+}
+#[cfg(all(test, unix))]
+mod failure_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
+    fn component(root: &Path, body: &str) -> PathBuf {
+        let p = root.join("fake-test-component");
+        fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+    fn unit() -> Vec<Unit> {
+        vec![Unit {
+            id: 0,
+            start: 0.,
+            end: 70.,
+            text: "An actual source sentence for the process failure test.".into(),
+            approximate: true,
+        }]
+    }
+    #[test]
+    fn memory_failure_is_reported_without_fabricated_candidates() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = component(
+            root.path(),
+            "printf 'out of memory allocating model' >&2\nexit 137",
+        );
+        let flag = AtomicBool::new(false);
+        let mut l = Llama {
+            binary: &binary,
+            model: Path::new("unused-test-model"),
+            root: root.path(),
+            cancel: &flag,
+            cpu_fallback_used: false,
+        };
+        let error = l.detect(&unit(), &[0], &[]).unwrap_err();
+        assert!(error.contains("Speichermangel"));
+        assert!(error.contains("out of memory"));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn running_inference_cancels_and_cleans_prompt_files() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = component(root.path(), "exec /bin/sleep 30");
+        let flag = Arc::new(AtomicBool::new(false));
+        let other = flag.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            other.store(true, Ordering::SeqCst);
+        });
+        let mut l = Llama {
+            binary: &binary,
+            model: Path::new("unused-test-model"),
+            root: root.path(),
+            cancel: &flag,
+            cpu_fallback_used: false,
+        };
+        let start = std::time::Instant::now();
+        assert!(l
+            .detect(&unit(), &[0], &[])
+            .unwrap_err()
+            .contains("abgebrochen"));
+        worker.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(3));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn missing_qwen_model_fails_before_processing() {
+        let root = tempfile::tempdir().unwrap();
+        let cancel = AtomicBool::new(false);
+        assert!(models::verify_file(
+            &models::spec_path(root.path(), models::QWEN),
+            models::QWEN.bytes,
+            models::QWEN.sha256,
+            &cancel
+        )
+        .unwrap_err()
+        .contains("Modell fehlt"));
+        assert!(!models::spec_status(root.path(), models::QWEN).ready);
     }
 }

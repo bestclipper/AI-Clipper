@@ -64,7 +64,14 @@ jobs:
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
           AI_CLIPPER_TEST_WHISPER: ${{ github.workspace }}/src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
           AI_CLIPPER_TEST_MODEL_ROOT: ${{ runner.temp }}/whisper-data
+          AI_CLIPPER_TEST_TRANSCRIPT_OUTPUT: ${{ runner.temp }}/real-english-transcript.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-english-transcript
+          path: ${{ runner.temp }}/real-english-transcript.json
+          retention-days: 14
   scene-tests:
+    needs: [speech-tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -78,11 +85,16 @@ jobs:
       - run: bash scripts/build-llama.sh
       - name: Download and verify pinned Qwen with the actual app downloader
         run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/qwen-data" qwen
+      - uses: actions/download-artifact@v4
+        with:
+          name: real-english-transcript
+          path: ${{ runner.temp }}/speech-fixture
       - name: Actual Qwen inference, distant relationship and unrelated negative control
         run: cargo test --manifest-path crates/media-core/Cargo.toml --locked --test analysis real_qwen_semantic_linking_and_rejection -- --include-ignored --nocapture
         env:
           AI_CLIPPER_TEST_LLAMA: ${{ github.workspace }}/src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
           AI_CLIPPER_TEST_QWEN_ROOT: ${{ runner.temp }}/qwen-data
+          AI_CLIPPER_TEST_TRANSCRIPT: ${{ runner.temp }}/speech-fixture/real-english-transcript.json
   macos-arm64:
     needs: [frontend, media-tests, speech-tests, scene-tests]
     # Standard Intel runner: free for this public repository.

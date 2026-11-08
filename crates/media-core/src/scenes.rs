@@ -161,6 +161,9 @@ pub fn windows(units: &[Unit]) -> Vec<Vec<usize>> {
         let mut bytes = 0;
         let mut end = at;
         while end < units.len() && end - at < 16 {
+            if end > at && units[end].end - units[at].start > 150. {
+                break;
+            }
             let size = units[end].text.len().min(1000) + 70;
             if end > at && bytes + size > 1500 {
                 break;
@@ -485,8 +488,13 @@ pub fn build_plans(events: &[Event], units: &[Unit], duration: f64) -> Vec<Plan>
     for anchor in diverse {
         let e = &events[anchor];
         let mut singles = Vec::new();
-        for first in e.first.saturating_sub(2)..=e.first {
-            for last in e.last..=(e.last + 2).min(units.len().saturating_sub(1)) {
+        for first in (0..=e.first)
+            .rev()
+            .take_while(|first| units[e.last].end - units[*first].start <= 90.001)
+        {
+            for last in (e.last..units.len())
+                .take_while(|last| units[*last].end - units[first].start <= 90.001)
+            {
                 let p = Plan {
                     id: String::new(),
                     parts: vec![Span { first, last }],
@@ -576,22 +584,43 @@ pub fn build_plans(events: &[Event], units: &[Unit], duration: f64) -> Vec<Plan>
                     Plan {
                         id: String::new(),
                         parts,
-                        event_ids: group.clone(),
+                        event_ids: std::iter::once(anchor)
+                            .chain(group.iter().copied().filter(|id| *id != anchor))
+                            .collect(),
                     },
                     &mut plans,
                     &mut seen,
                 );
             }
-            if plans.len() >= 96 {
-                break;
-            }
-        }
-        if plans.len() >= 96 {
-            break;
         }
     }
-    plans.truncate(96);
-    plans
+    // Keep the candidate budget distributed over the entire source, not its prefix.
+    let mut buckets: Vec<Vec<Plan>> = (0..8).map(|_| Vec::new()).collect();
+    for plan in plans {
+        let bucket = ((units[events[plan.event_ids[0]].first].start / duration * 8.).floor()
+            as usize)
+            .min(7);
+        buckets[bucket].push(plan);
+    }
+    let mut selected = Vec::new();
+    let mut index = 0;
+    while selected.len() < 96 {
+        let mut added = false;
+        for bucket in &buckets {
+            if let Some(p) = bucket.get(index) {
+                selected.push(p.clone());
+                added = true;
+                if selected.len() == 96 {
+                    break;
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+        index += 1;
+    }
+    selected
 }
 fn push_plan(mut plan: Plan, plans: &mut Vec<Plan>, seen: &mut HashSet<String>) {
     let key = plan
@@ -753,6 +782,69 @@ mod tests {
         let mut invalid = p.clone();
         invalid.parts.push(Span { first: 0, last: 0 });
         assert!(plan_segments(&invalid, &u, 500.).is_err());
+    }
+    #[test]
+    fn short_sentence_units_can_form_a_single_scene() {
+        let u = (0..60)
+            .map(|id| Unit {
+                id,
+                start: id as f64 * 2.,
+                end: id as f64 * 2. + 2.,
+                text: "A complete short source sentence about the same challenge.".into(),
+                approximate: true,
+            })
+            .collect::<Vec<_>>();
+        let e = vec![event(25, 26, "complete short source sentence")];
+        assert!(build_plans(&e, &u, 120.)
+            .iter()
+            .any(|p| p.parts.len() == 1 && plan_segments(p, &u, 120.).is_ok()));
+    }
+    #[test]
+    fn three_segments_and_late_stream_candidates_survive_budget() {
+        let u = (0..200)
+            .map(|id| Unit {
+                id,
+                start: id as f64 * 100.,
+                end: id as f64 * 100. + 25.,
+                text: "The actual recurring challenge has an unexpected result.".into(),
+                approximate: true,
+            })
+            .collect::<Vec<_>>();
+        let e = (0..200)
+            .map(|id| event(id, id, "actual recurring challenge"))
+            .collect::<Vec<_>>();
+        let p = Plan {
+            id: "three".into(),
+            parts: vec![
+                Span { first: 0, last: 0 },
+                Span {
+                    first: 30,
+                    last: 30,
+                },
+                Span {
+                    first: 190,
+                    last: 190,
+                },
+            ],
+            event_ids: vec![],
+        };
+        assert_eq!(
+            plan_segments(&p, &u, 20000.)
+                .unwrap()
+                .iter()
+                .map(|p| p.duration)
+                .sum::<f64>(),
+            75.
+        );
+        let plans = build_plans(&e, &u, 20000.);
+        assert!(plans.len() <= 96);
+        assert!(plans.iter().any(|p| p.parts.len() >= 3));
+        assert!(
+            plans
+                .iter()
+                .any(|p| u[e[p.event_ids[0]].first].start >= 17500.),
+            "late anchors must survive candidate budget"
+        );
     }
     #[test]
     fn windows_cover_long_transcripts_with_overlap() {

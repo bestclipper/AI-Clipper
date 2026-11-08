@@ -391,12 +391,13 @@ export default function App() {
                 </p>
               </div>
               <button className="generate" disabled>
-                <Sparkles size={17} /> 5 Clips erstellen <span>Später</span>
+                <Sparkles size={17} /> 10 Clips erstellen <span>Später</span>
               </button>
             </aside>
           </div>
           <TranscriptionPanel
             key={`asr-${source?.id ?? 0}`}
+            refresh={refresh}
             sourcePath={source?.nativePath}
             hasAudio={nativeMedia?.hasAudio}
             otherBusy={exportBusy || busy || analysisBusy}
