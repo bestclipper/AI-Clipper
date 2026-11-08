@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 6;
+const VERSION: u32 = 7;
 const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -334,8 +334,10 @@ impl Llama<'_> {
         let schema = object(
             json!({"aTopics":{"type":"array","minItems":parts.len(),"maxItems":parts.len(),"items":{"type":"string"}},"bConcreteLink":{"type":"string"},"cRelation":{"type":"string","enum":["setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"zSameSpecificStory":{"type":"boolean"}}),
         );
-        let prompt=format!("FACTUAL LINK AUDIT. These excerpts are suspected to be unrelated. Your task is NOT to make a clip work or to rate entertainment. First state the concrete topic of EACH excerpt in aTopics. Then identify the SAME specific event, promise, question or dispute connecting ALL excerpts in bConcreteLink. Describe only source facts; distinguish future commitments from completed actions. If no concrete link is stated in the actual words, say 'No concrete link'. Different activities, analogy, juxtaposition, contrast, similar feelings, competition in general or preparation in general are NOT a story relationship. A reaction must refer to the actual earlier claim or event. Then choose cRelation and finally zSameSpecificStory. When the topics differ and no explicit connection is stated, cRelation MUST be unrelated and zSameSpecificStory MUST be false. When uncertain, reject. No invented bridges.
-EXCERPTS: {}",serde_json::to_string(&parts).unwrap());
+        let prompt=format!("FACTUAL LINK AUDIT. Determine whether these excerpts belong to the same specific story. Do not rate entertainment. First list the actual topic of each excerpt in aTopics. Then explain the concrete connection, or write 'No concrete link', in bConcreteLink. Choose cRelation. Finally set zSameSpecificStory true for a real link and false for unrelated excerpts. A later result of an earlier bet or promise IS a setup_payoff link, even when the promised future punishment has not happened yet. A later answer to the same question or reaction to the same incident also counts. Different activities, mood, analogy, juxtaposition, contrast, competition in general or preparation in general do NOT count. Do not invent a connection.
+Positive example: 'I will win this chess match.' then 'You lost the chess match.' Topics: chess prediction, chess result. Concrete link: the later result resolves the earlier prediction about the SAME match. Relation: setup_payoff. zSameSpecificStory: true.
+Negative example: 'I will win this chess match.' then 'Put rice in boiling water.' Topics: chess prediction, cooking rice. No concrete link. Relation: unrelated. zSameSpecificStory: false.
+Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}",serde_json::to_string(&parts).unwrap());
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
         struct Audit {
