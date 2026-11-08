@@ -45,9 +45,10 @@ fn real_qwen_semantic_linking_and_rejection() {
     let separated = events.clone();
     let generated = build_plans(&separated, &u, 240.);
     assert!(
-        generated
-            .iter()
-            .any(|p| p.parts.len() == 2 && plan_segments(p, &u, 240.).is_ok()),
+        generated.iter().any(|p| p.parts.len() == 2
+            && p.parts.iter().any(|s| s.first <= 1)
+            && p.parts.iter().any(|s| s.first >= 2)
+            && plan_segments(p, &u, 240.).is_ok()),
         "actual model events must generate a valid distant Smart Story"
     );
     let plan = Plan {
@@ -83,6 +84,10 @@ fn real_qwen_semantic_linking_and_rejection() {
     };
     let j = llama.judge(&single, &u).unwrap();
     assert!(j.ratings.valid());
+    assert_eq!(
+        validate_candidate(&single, j, &u, 240.).unwrap().mode,
+        "single_scene"
+    );
     assert_eq!(plan_segments(&single, &u, 240.).unwrap()[0].duration, 70.);
     if let Some(path) = std::env::var_os("AI_CLIPPER_TEST_TRANSCRIPT") {
         let t: clipper_media::transcription::Transcript =

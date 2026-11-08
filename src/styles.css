@@ -931,3 +931,12 @@ footer span:first-child {
   background: #262038;
   color: #d6c8ff;
 }
+
+.story-tag {
+  color: #ceb9ff;
+  background: #332748;
+}
+.scene-tag {
+  color: #91d8de;
+  background: #19393e;
+}

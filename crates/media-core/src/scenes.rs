@@ -84,6 +84,38 @@ pub struct Candidate {
     pub evidence: Vec<String>,
     pub timestamps_approximate: bool,
 }
+/// Correct formatting only. Every returned character sequence must occur in source.
+/// Small models sometimes quote a JSON `text`/`selected` field including its wrapper.
+pub fn grounded_quote(raw: &str, source: &str) -> Option<String> {
+    let mut value = raw.trim().to_string();
+    for _ in 0..4 {
+        if value.len() >= 8 && source.to_lowercase().contains(&value.to_lowercase()) {
+            return Some(value);
+        }
+        let parsed = serde_json::from_str::<serde_json::Value>(&value).ok();
+        let next = match parsed {
+            Some(serde_json::Value::String(text)) => Some(text),
+            Some(serde_json::Value::Object(map)) => ["selected", "text", "quote", "evidence"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(|v| v.as_str()).map(str::to_owned)),
+            _ => None,
+        };
+        if let Some(next) = next {
+            value = next.trim().to_string();
+        } else {
+            let stripped = value.trim_matches(['"', '“', '”']).trim();
+            if stripped == value {
+                return None;
+            }
+            value = stripped.to_string();
+        }
+    }
+    if value.len() >= 8 && source.to_lowercase().contains(&value.to_lowercase()) {
+        Some(value)
+    } else {
+        None
+    }
+}
 fn normalized(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric())
@@ -293,6 +325,7 @@ pub fn validate_candidate(
         || j.title.len() > 160
         || j.reason.trim().len() < 12
         || j.reason.len() > 800
+        || j.category.trim().is_empty()
         || j.category.len() > 100
         || j.evidence.len() != parts.len()
     {
@@ -372,9 +405,6 @@ pub fn rank_deduplicate(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
     for candidate in candidates {
         if !result.iter().any(|other| overlap(&candidate, other) >= 0.8) {
             result.push(candidate);
-        }
-        if result.len() >= 50 {
-            break;
         }
     }
     result
@@ -782,6 +812,48 @@ mod tests {
         let mut invalid = p.clone();
         invalid.parts.push(Span { first: 0, last: 0 });
         assert!(plan_segments(&invalid, &u, 500.).is_err());
+    }
+    #[test]
+    fn quotation_format_correction_never_invents_source_words() {
+        let source = "I promised to wear the chicken suit tomorrow.";
+        assert_eq!(
+            grounded_quote(
+                r#"{"selected":"I promised to wear the chicken suit tomorrow."}"#,
+                source
+            )
+            .as_deref(),
+            Some(source)
+        );
+        assert_eq!(
+            grounded_quote(
+                r#"{"text":"I promised to wear the chicken suit tomorrow."}"#,
+                source
+            )
+            .as_deref(),
+            Some(source)
+        );
+        assert!(grounded_quote(r#"{"text":"I already wore the chicken suit."}"#, source).is_none());
+        assert!(grounded_quote("I promised ... tomorrow", source).is_none());
+        assert!(grounded_quote(
+            r#"{"text":"An unrelated recipe with flour and eggs."}"#,
+            source
+        )
+        .is_none());
+    }
+    #[test]
+    fn sentence_boundaries_use_existing_word_times_and_keep_untimed_text() {
+        let mut t:Transcript=serde_json::from_value(serde_json::json!({"schemaVersion":1,"sourceKey":"source","sourcePath":"/test/source.mp4","model":"base.en","language":"en","engine":"whisper.cpp","duration":240.,"wordsApproximate":true,"alignmentStatus":"unreviewed","segments":[{"start":18.,"end":55.,"text":"I promise to win the moon race. Let us start the challenge.","words":[{"text":"I promise to win","start":18.,"end":30.,"approximate":true},{"text":"the moon race.","start":30.,"end":45.,"approximate":true},{"text":"Let us start the challenge.","start":45.,"end":55.,"approximate":true}]}],"cpuFallbackUsed":false})).unwrap();
+        let units = make_units(&t);
+        assert_eq!(units.len(), 2);
+        assert_eq!((units[0].start, units[0].end), (18., 45.));
+        assert_eq!((units[1].start, units[1].end), (45., 55.));
+        t.segments[0]
+            .text
+            .push_str(" Important words without individual timestamps.");
+        let kept = make_units(&t);
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].start, kept[0].end), (18., 55.));
+        assert!(kept[0].text.contains("without individual timestamps"));
     }
     #[test]
     fn weighting_respects_each_requested_share() {

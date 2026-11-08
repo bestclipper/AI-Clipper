@@ -289,7 +289,13 @@ export default function AnalysisPanel({
               <article className="scene-card" key={clip.id}>
                 <div className="scene-card-heading">
                   <div>
-                    <span className="tag">
+                    <span
+                      className={
+                        clip.mode === "smart_story"
+                          ? "tag story-tag"
+                          : "tag scene-tag"
+                      }
+                    >
                       {clip.mode === "smart_story"
                         ? "Smart Story"
                         : "Single Scene"}{" "}

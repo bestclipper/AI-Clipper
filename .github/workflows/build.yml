@@ -117,7 +117,7 @@ jobs:
           AI_CLIPPER_TEST_QWEN_ROOT: ${{ runner.temp }}/qwen-data
           AI_CLIPPER_TEST_TRANSCRIPT: ${{ runner.temp }}/speech-fixture/real-english-transcript.json
   macos-arm64:
-    needs: [frontend, media-tests, speech-tests, scene-tests]
+    needs: [frontend, media-tests, speech-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel

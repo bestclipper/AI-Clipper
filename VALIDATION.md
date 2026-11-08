@@ -7,7 +7,7 @@ Nutzers. Phase 1–3 wurden vom Nutzer auf dem M1 mit 8 GB erfolgreich abgenomme
 ## Lokal erfolgreich
 
 - 12 Frontend-Unit-Tests, TypeScript- und Vite-Produktionsbuild.
-- 22 Rust-Kerntests: gewichtete Bewertung, 77-Sekunden-Smart-Story mit bestehenden
+- 24 Rust-Kerntests: gewichtete Bewertung, 77-Sekunden-Smart-Story mit bestehenden
   Grenzen 18–45 und 170–220, 3–5 Segmente, Überlappungen, Reihenfolge, Grenzen,
   Belegzitate, Ablehnung unverbundener Beziehungen, Duplikate, 1000 Textstellen,
   kurze Satzsegmente, zeitliche Abdeckung trotz Kandidatenbudget, Checkpoints,

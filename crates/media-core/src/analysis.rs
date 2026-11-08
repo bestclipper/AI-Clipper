@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -233,7 +233,7 @@ impl Llama<'_> {
             invalid_quotes: 0,
             invalid_duration: 0,
         };
-        for e in output.events {
+        for mut e in output.events {
             let span = Span {
                 first: e.first,
                 last: e.last,
@@ -244,6 +244,11 @@ impl Llama<'_> {
             {
                 report.invalid_ids += 1;
                 continue;
+            }
+            if let Some(quote) =
+                scenes::grounded_quote(&e.evidence, &scenes::span_text(units, &span).unwrap())
+            {
+                e.evidence = quote;
             }
             if e.evidence.trim().len() < 8
                 || !scenes::span_text(units, &span)
@@ -268,9 +273,18 @@ impl Llama<'_> {
 
     pub fn judge(&mut self, plan: &Plan, units: &[Unit]) -> Result<Judgment, String> {
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
-        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
-        serde_json::from_value(self.infer(&prompt, &judgment_schema())?)
-            .map_err(|_| "Ungültige Clip-Bewertung der KI.".into())
+        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events. Distinguish future promises from completed actions: a promise to wear a costume tomorrow does not mean the costume has already been worn. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let mut judgment: Judgment =
+            serde_json::from_value(self.infer(&prompt, &judgment_schema())?)
+                .map_err(|_| "Ungültige Clip-Bewertung der KI.")?;
+        for (part, quote) in plan.parts.iter().zip(judgment.evidence.iter_mut()) {
+            if let Some(source) = scenes::span_text(units, part) {
+                if let Some(corrected) = scenes::grounded_quote(quote, &source) {
+                    *quote = corrected;
+                }
+            }
+        }
+        Ok(judgment)
     }
 }
 fn retain_events(events: &mut Vec<Event>, units: &[Unit], duration: f64) {

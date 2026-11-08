@@ -45,6 +45,7 @@ Metal-Problemen einmaliger CPU-Fallback. Auf dem M1 kann dies lange dauern.
 
 Alle Transkriptfenster werden verarbeitet. Für begrenzten Aufwand bleiben maximal
 256 zeitlich verteilte Ereignisse, 32 Anker und 96 Bewertungskandidaten erhalten.
+Alle gültigen, deduplizierten Bewertungskandidaten sind in der Liste einblendbar.
 Globale Nachbarn werden mit semantischen Modellbeschreibungen vorgefiltert;
 dadurch können Beziehungen übersehen werden. Dies ist keine Garantie, jeden
 besten Moment oder jede irreführende Kombination zu erkennen. Scores (1–10)
