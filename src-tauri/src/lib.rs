@@ -1,3 +1,4 @@
+use clipper_media::{models, transcription};
 use clipper_media::{ExportResult, MediaInfo, Progress, Tools};
 use std::{
     path::{Path, PathBuf},
@@ -23,6 +24,117 @@ impl Drop for ActiveGuard {
             .active
             .store(false, Ordering::SeqCst);
     }
+}
+fn binary_path(name: &str) -> Result<PathBuf, String> {
+    let directory = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("App-Verzeichnis fehlt.")?
+        .to_path_buf();
+    let path = directory.join(name);
+    if !path.is_file() {
+        return Err(format!(
+            "Die mitgelieferte Komponente {name} fehlt. Bitte die vollständige App installieren."
+        ));
+    }
+    Ok(path)
+}
+pub fn check_bundled_whisper() -> Result<(), String> {
+    transcription::check_whisper(&binary_path("whisper-cli")?)
+}
+fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    Ok(root)
+}
+fn begin_operation(app: &tauri::AppHandle) -> Result<(ActiveGuard, Arc<AtomicBool>), String> {
+    let state = app.state::<ExportState>();
+    if state
+        .active
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("Es läuft bereits eine Verarbeitung. Bitte warten oder abbrechen.".into());
+    }
+    state.cancelled.store(false, Ordering::SeqCst);
+    Ok((ActiveGuard(app.clone()), state.cancelled.clone()))
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AsrStatus {
+    model: models::ModelStatus,
+    component_ready: bool,
+    component_error: Option<String>,
+}
+#[tauri::command]
+async fn asr_status(app: tauri::AppHandle) -> Result<AsrStatus, String> {
+    let root = data_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let health = check_bundled_whisper();
+        Ok(AsrStatus {
+            model: models::model_status(&root),
+            component_ready: health.is_ok(),
+            component_error: health.err(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn download_whisper_model(
+    app: tauri::AppHandle,
+    on_progress: Channel<models::ModelProgress>,
+) -> Result<models::ModelStatus, String> {
+    let root = data_root(&app)?;
+    let (_guard, cancel) = begin_operation(&app)?;
+    models::download_model(&root, &cancel, |p| {
+        if on_progress.send(p).is_err() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    })
+    .await
+}
+#[tauri::command]
+fn cancel_operation(state: State<'_, ExportState>) {
+    state.cancelled.store(true, Ordering::SeqCst);
+}
+#[tauri::command]
+async fn load_transcript(
+    app: tauri::AppHandle,
+    source_path: String,
+) -> Result<Option<transcription::Transcript>, String> {
+    let source = checked_source(&app, &source_path)?;
+    let root = data_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || transcription::load_transcript(&root, &source))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn transcribe_video(
+    app: tauri::AppHandle,
+    source_path: String,
+    on_progress: Channel<transcription::TranscriptionProgress>,
+) -> Result<transcription::Transcript, String> {
+    let source = checked_source(&app, &source_path)?;
+    let root = data_root(&app)?;
+    let (guard, cancel) = begin_operation(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        transcription::transcribe(
+            &tools()?,
+            &binary_path("whisper-cli")?,
+            &root,
+            &source,
+            &cancel,
+            |p| {
+                if on_progress.send(p).is_err() {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 fn tools() -> Result<Tools, String> {
     let directory = std::env::current_exe()
@@ -74,17 +186,7 @@ async fn export_clip(
     on_progress: Channel<Progress>,
 ) -> Result<Option<ExportResult>, String> {
     let source = checked_source(&app, &source_path)?;
-    let state = app.state::<ExportState>();
-    if state
-        .active
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return Err("Es läuft bereits ein Export. Bitte warten oder abbrechen.".into());
-    }
-    state.cancelled.store(false, Ordering::SeqCst);
-    let cancel = state.cancelled.clone();
-    let guard = ActiveGuard(app.clone());
+    let (guard, cancel) = begin_operation(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let tools = tools()?;
@@ -132,7 +234,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_source,
             export_clip,
-            cancel_export
+            cancel_export,
+            asr_status,
+            download_whisper_model,
+            cancel_operation,
+            load_transcript,
+            transcribe_video
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

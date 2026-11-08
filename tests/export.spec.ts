@@ -21,6 +21,18 @@ test.beforeEach(async ({ page }) => {
         args: { onProgress?: { onmessage: (data: unknown) => void } },
       ) => {
         if (command === "plugin:dialog|open") return "/Users/test/source.mp4";
+        if (command === "asr_status")
+          return {
+            model: {
+              id: "base.en",
+              ready: false,
+              bytes: 147964211,
+              sha256: "test",
+            },
+            componentReady: true,
+            componentError: null,
+          };
+        if (command === "load_transcript") return null;
         if (command === "probe_source")
           return { duration: 120, width: 320, height: 180, hasAudio: true };
         if (command === "cancel_export") {

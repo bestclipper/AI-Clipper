@@ -1,7 +1,9 @@
+pub mod models;
+pub mod transcription;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -65,22 +67,8 @@ pub fn validate_range(start: f64, duration: f64, source_duration: f64) -> Result
     }
     Ok(())
 }
-fn bounded_read(mut reader: impl Read) -> Vec<u8> {
-    let mut tail = Vec::new();
-    let mut chunk = [0u8; 4096];
-    while let Ok(n) = reader.read(&mut chunk) {
-        if n == 0 {
-            break;
-        }
-        tail.extend_from_slice(&chunk[..n]);
-        if tail.len() > 32768 {
-            tail.drain(..tail.len() - 32768);
-        }
-    }
-    tail
-}
 // No shell, no inherited stdin, bounded logs and one process at a time.
-fn run(
+pub(crate) fn run(
     tool: &Path,
     args: &[String],
     cancel: &AtomicBool,
@@ -88,7 +76,7 @@ fn run(
     timeout: Duration,
 ) -> Result<Vec<u8>, String> {
     if cancel.load(Ordering::Relaxed) {
-        return Err("Export abgebrochen.".into());
+        return Err("Vorgang abgebrochen.".into());
     }
     let mut child = Command::new(tool)
         .args(args)
@@ -100,11 +88,12 @@ fn run(
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     let (tx, rx) = mpsc::sync_channel(128);
+    let err_tx = tx.clone();
     let out_thread = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
                 Ok(line) => {
-                    if tx.send(line).is_err() {
+                    if tx.send((true, line)).is_err() {
                         break;
                     }
                 }
@@ -112,14 +101,27 @@ fn run(
             }
         }
     });
-    let err_thread = thread::spawn(move || bounded_read(stderr));
+    let err_thread = thread::spawn(move || {
+        let mut tail = Vec::new();
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            tail.extend_from_slice(line.as_bytes());
+            tail.push(b'\n');
+            if tail.len() > 32768 {
+                tail.drain(..tail.len() - 32768);
+            }
+            if err_tx.send((false, line)).is_err() {
+                break;
+            }
+        }
+        tail
+    });
     let began = Instant::now();
     let mut output = Vec::new();
     let mut interrupted = None;
     let status = loop {
         if cancel.load(Ordering::Relaxed) || began.elapsed() > timeout {
             interrupted = Some(if cancel.load(Ordering::Relaxed) {
-                "Export abgebrochen."
+                "Vorgang abgebrochen."
             } else {
                 "Das Medienwerkzeug hat das Zeitlimit überschritten."
             });
@@ -127,9 +129,9 @@ fn run(
             break child.wait();
         }
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(line) => {
+            Ok((stdout, line)) => {
                 on_line(&line);
-                if output.len() < 1048576 {
+                if stdout && output.len() < 1048576 {
                     output.extend_from_slice(line.as_bytes());
                     output.push(b'\n');
                 }
@@ -148,9 +150,9 @@ fn run(
         }
     };
     // Drain before joining so the bounded producer cannot block on a full channel.
-    for line in rx {
+    for (stdout, line) in rx {
         on_line(&line);
-        if output.len() < 1048576 {
+        if stdout && output.len() < 1048576 {
             output.extend_from_slice(line.as_bytes());
             output.push(b'\n');
         }
@@ -171,7 +173,7 @@ fn run(
 }
 impl Tools {
     fn probe_json(&self, source: &Path, cancel: &AtomicBool) -> Result<serde_json::Value, String> {
-        let args = vec!["-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,sample_aspect_ratio,duration", "-of", "json", "-i"].into_iter().map(String::from).chain([source.to_string_lossy().into_owned()]).collect::<Vec<_>>();
+        let args = vec!["-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,sample_aspect_ratio,duration,start_time", "-of", "json", "-i"].into_iter().map(String::from).chain([source.to_string_lossy().into_owned()]).collect::<Vec<_>>();
         let bytes = run(
             &self.ffprobe,
             &args,
@@ -332,7 +334,7 @@ impl Tools {
                 Duration::from_secs(600),
             )?;
             if cancel.load(Ordering::Relaxed) {
-                return Err("Export abgebrochen.".into());
+                return Err("Vorgang abgebrochen.".into());
             }
             notify(progress("complete", 100.0));
             Ok(ExportResult {
@@ -429,5 +431,31 @@ mod tests {
         assert!(verify_metadata(&v, 61., true).is_err());
         v["streams"][0]["codec_name"] = "hevc".into();
         assert!(verify_metadata(&v, 61., false).is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod process_tests {
+    use super::*;
+    use std::sync::Arc;
+    #[test]
+    fn cancellation_terminates_a_running_process() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let thread = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let start = Instant::now();
+        assert!(run(
+            Path::new("/bin/sleep"),
+            &["30".into()],
+            &cancel,
+            |_| {},
+            Duration::from_secs(60)
+        )
+        .is_err());
+        thread.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(3));
     }
 }
