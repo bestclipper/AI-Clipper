@@ -20,3 +20,18 @@ The `base.en` model is a GGML conversion of OpenAI's open-source Whisper weights
 Expected base.en file: `ggml-base.en.bin`, 147,964,211 bytes, SHA-256 `a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002`. The pinned upstream whisper.cpp model README also lists SHA-1 `137c40403d78fd54d454da0f9bd998f78703390c`. The app installs only a verified file.
 
 `tests/fixtures/jfk.wav` comes from the pinned whisper.cpp samples and contains President Kennedy's English public speech. It is used only for reproducible local/CI recognition tests, not uploaded to an inference service.
+
+## Phase 4
+
+- llama.cpp, MIT, pinned commit `a691b2345844ce1b430201fc5fd404ce062e05f2`.
+  Built statically by `scripts/build-llama.sh`; source archive, build script,
+  and license are distributed inside the app's `third-party` resources.
+- Qwen3 1.7B GGUF Q4_K_M, Apache-2.0. Original Qwen/Qwen3-1.7B;
+  quantization by ggml-org, pinned revision
+  `daeb8e2d528a760970442092f6bf1e55c3b659eb`. Model is downloaded separately
+  by user action, not bundled. Trusted SHA-256 comes from the pinned Git LFS
+  pointer: `d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5`.
+  License text in `licenses/qwen-Apache-2.0.txt` (SPDX license-list-data
+  Apache-2.0 standard text), also bundled in resources. The pinned model card
+  declares Apache-2.0; upstream Qwen model card declares Apache-2.0.
+- hound, Apache-2.0, streaming PCM WAV reader. No paid dependency or API.

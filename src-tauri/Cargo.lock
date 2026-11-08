@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-clipper"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clipper-media",
  "serde",
@@ -361,6 +361,7 @@ name = "clipper-media"
 version = "0.2.0"
 dependencies = [
  "futures-util",
+ "hound",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1246,6 +1247,12 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "html5ever"

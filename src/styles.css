@@ -881,3 +881,62 @@ footer span:first-child {
 .transcript input {
   max-width: 420px;
 }
+.scene-results {
+  margin-top: 24px;
+}
+.scene-card {
+  background: #151820;
+  border: 1px solid #303440;
+  border-radius: 14px;
+  padding: 22px;
+  margin: 18px 0;
+}
+.scene-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 18px;
+}
+.scene-card h3 {
+  margin-top: 12px;
+}
+.scene-score {
+  color: #b9a1ff;
+  font-size: 28px;
+  white-space: nowrap;
+}
+.scene-score small {
+  font-size: 13px;
+  color: #9ca1b2;
+}
+.scene-card li {
+  padding: 6px 0;
+  color: #c5c9d7;
+}
+.scene-card blockquote {
+  border-left: 2px solid #7361c8;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #a9aec1;
+}
+.scene-card details {
+  margin-top: 18px;
+}
+.playlist-status {
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #262038;
+  color: #d6c8ff;
+}
+
+.story-tag {
+  color: #ceb9ff;
+  background: #332748;
+}
+.scene-tag {
+  color: #91d8de;
+  background: #19393e;
+}

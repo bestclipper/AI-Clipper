@@ -23,6 +23,13 @@ import {
 } from "./pipeline";
 import ExportPanel from "./ExportPanel";
 import TranscriptionPanel from "./TranscriptionPanel";
+import AnalysisPanel from "./AnalysisPanel";
+import {
+  playlistStep,
+  validPlaylist,
+  type Candidate,
+  type ClipSegment,
+} from "./analysis";
 import type { MediaInfo } from "./export";
 type Source = {
   id: number;
@@ -41,6 +48,62 @@ export default function App() {
   const [error, setError] = useState("");
   const [exportBusy, setExportBusy] = useState(false);
   const [asrBusy, setAsrBusy] = useState(false);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const playlist = useRef<{ parts: ClipSegment[]; index: number } | null>(null);
+  const [previewTitle, setPreviewTitle] = useState("");
+  function stopPreview() {
+    playlist.current = null;
+    setPreviewTitle("");
+    video.current?.pause();
+  }
+  async function previewClip(clip: Candidate) {
+    const v = video.current;
+    if (!v || !validPlaylist(clip.segments, v.duration)) {
+      setError("Diese Szenenzeiten können nicht wiedergegeben werden.");
+      return;
+    }
+    playlist.current = { parts: clip.segments, index: 0 };
+    setPreviewTitle(clip.title);
+    v.currentTime = clip.segments[0].start;
+    try {
+      await v.play();
+      v.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {
+      stopPreview();
+      setError(
+        "Vorschau konnte nicht gestartet werden. Bitte Videoformat und Wiedergabe prüfen.",
+      );
+    }
+  }
+  function advancePlaylist() {
+    const p = playlist.current,
+      v = video.current;
+    if (!p || !v || v.seeking) return;
+    const next = playlistStep(p.parts, p.index, v.currentTime);
+    if (next.finished) {
+      v.pause();
+      v.currentTime = p.parts[p.index].end;
+      playlist.current = null;
+      setPreviewTitle("");
+      return;
+    }
+    p.index = next.index;
+    if (next.seek !== undefined) {
+      v.currentTime = next.seek;
+      if (v.ended) void v.play().catch(() => stopPreview());
+    }
+  }
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      if (video.current && !video.current.paused) advancePlaylist();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   const [nativeMedia, setNativeMedia] = useState<MediaInfo | null>(null);
   const video = useRef<HTMLVideoElement>(null);
   const [busy, setBusy] = useState(false);
@@ -53,6 +116,7 @@ export default function App() {
     [source],
   );
   function replace(next: Omit<Source, "id">) {
+    stopPreview();
     setError("");
     setMeta(null);
     setNativeMedia(null);
@@ -122,7 +186,7 @@ export default function App() {
           </p>
         </div>
         <div className="device">
-          <span className="dot" /> Apple Silicon <small>Phase 3 · v0.3.0</small>
+          <span className="dot" /> Apple Silicon <small>Phase 4 · v0.4.0</small>
         </div>
       </aside>
       <main>
@@ -144,7 +208,7 @@ export default function App() {
               <p>Importiere deinen Stream und entdecke, was drinsteckt.</p>
             </div>
             <span className="phase">
-              PHASE 03 <span>Englische Transkription</span>
+              PHASE 04 <span>Lokale Szenenerkennung</span>
             </span>
           </div>
           <div className="steps">
@@ -196,7 +260,10 @@ export default function App() {
                         height: v.videoHeight,
                       });
                     }}
+                    onTimeUpdate={advancePlaylist}
+                    onEnded={advancePlaylist}
                     onError={() => {
+                      stopPreview();
                       setMeta(null);
                       setError(
                         "Dieses Video kann nicht wiedergegeben werden. Versuche MP4 mit H.264-Video und AAC-Audio.",
@@ -216,7 +283,7 @@ export default function App() {
                     </p>
                     <button
                       onClick={importVideo}
-                      disabled={busy || exportBusy || asrBusy}
+                      disabled={busy || exportBusy || asrBusy || analysisBusy}
                     >
                       <Upload size={16} />{" "}
                       {busy ? "Wird geöffnet …" : "Video auswählen"}
@@ -228,6 +295,14 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {previewTitle && (
+                <div className="playlist-status" role="status">
+                  <span>Playlist-Vorschau · {previewTitle}</span>
+                  <button className="secondary" onClick={stopPreview}>
+                    Vorschau beenden
+                  </button>
+                </div>
+              )}
               <div className="source-bar">
                 <Film size={19} />
                 <div>
@@ -247,15 +322,16 @@ export default function App() {
                     <button
                       className="secondary"
                       onClick={importVideo}
-                      disabled={busy || exportBusy || asrBusy}
+                      disabled={busy || exportBusy || asrBusy || analysisBusy}
                     >
                       Ändern
                     </button>
                     <button
                       className="icon-button"
                       aria-label="Video entfernen"
-                      disabled={exportBusy || asrBusy}
+                      disabled={exportBusy || asrBusy || analysisBusy}
                       onClick={() => {
+                        stopPreview();
                         setSource(null);
                         setNativeMedia(null);
                         setMeta(null);
@@ -315,25 +391,40 @@ export default function App() {
                 </p>
               </div>
               <button className="generate" disabled>
-                <Sparkles size={17} /> 5 Clips erstellen <span>Später</span>
+                <Sparkles size={17} /> 10 Clips erstellen <span>Später</span>
               </button>
             </aside>
           </div>
           <TranscriptionPanel
             key={`asr-${source?.id ?? 0}`}
+            refresh={refresh}
             sourcePath={source?.nativePath}
             hasAudio={nativeMedia?.hasAudio}
-            otherBusy={exportBusy || busy}
+            otherBusy={exportBusy || busy || analysisBusy}
             onBusy={(value) => {
               setAsrBusy(value);
-              if (value) video.current?.pause();
+              if (value) stopPreview();
             }}
             onSeek={(seconds) => {
+              playlist.current = null;
+              setPreviewTitle("");
               if (video.current) {
                 video.current.currentTime = seconds;
                 video.current.focus();
               }
             }}
+          />
+          <AnalysisPanel
+            key={`analysis-${source?.id ?? 0}`}
+            sourcePath={source?.nativePath}
+            refresh={refresh}
+            otherBusy={exportBusy || asrBusy || busy}
+            onBusy={(value) => {
+              setAnalysisBusy(value);
+              if (value) stopPreview();
+              else setRefresh((v) => v + 1);
+            }}
+            onPreview={previewClip}
           />
           <ExportPanel
             key={source?.id ?? 0}
@@ -343,10 +434,10 @@ export default function App() {
               (source?.blob && meta ? { ...meta, hasAudio: false } : null)
             }
             currentTime={() => video.current?.currentTime ?? 0}
-            otherBusy={asrBusy || busy}
+            otherBusy={asrBusy || busy || analysisBusy}
             onBusy={(value) => {
               setExportBusy(value);
-              if (value) video.current?.pause();
+              if (value) stopPreview();
             }}
           />
           {error && (
@@ -391,8 +482,9 @@ export default function App() {
                 },
                 {
                   icon: Scan,
-                  title: "Die besten Szenen",
-                  text: "KI findet automatisch fünf Highlights.",
+                  title: "Szenenvorschläge",
+                  text: "Single Scene und Smart Story lokal analysieren.",
+                  ready: true,
                 },
                 {
                   icon: Captions,

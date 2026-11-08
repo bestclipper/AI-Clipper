@@ -39,7 +39,7 @@ jobs:
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
-      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel
+      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel --skip real_qwen_semantic_linking_and_rejection
         env:
           AI_CLIPPER_TEST_FFMPEG: /usr/bin/ffmpeg
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
@@ -64,8 +64,60 @@ jobs:
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
           AI_CLIPPER_TEST_WHISPER: ${{ github.workspace }}/src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
           AI_CLIPPER_TEST_MODEL_ROOT: ${{ runner.temp }}/whisper-data
+          AI_CLIPPER_TEST_TRANSCRIPT_OUTPUT: ${{ runner.temp }}/real-english-transcript.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-english-transcript
+          path: ${{ runner.temp }}/real-english-transcript.json
+          retention-days: 14
+  scene-tests:
+    needs: [speech-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native inference build tools
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get install -y --no-install-recommends cmake build-essential
+      - uses: actions/cache/restore@v4
+        id: llama-cache
+        with:
+          path: src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          key: linux-llama-${{ hashFiles('scripts/build-llama.sh') }}
+      - if: steps.llama-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-llama.sh
+      - if: steps.llama-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          key: linux-llama-${{ hashFiles('scripts/build-llama.sh') }}
+      - uses: actions/cache/restore@v4
+        id: qwen-cache
+        with:
+          path: ${{ runner.temp }}/qwen-data/models
+          key: qwen-model-${{ hashFiles('crates/media-core/src/models.rs') }}
+      - name: Download and verify pinned Qwen with the actual app downloader
+        run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/qwen-data" qwen
+      - if: steps.qwen-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/qwen-data/models
+          key: qwen-model-${{ hashFiles('crates/media-core/src/models.rs') }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: real-english-transcript
+          path: ${{ runner.temp }}/speech-fixture
+      - name: Actual Qwen inference, distant relationship and unrelated negative control
+        run: cargo test --manifest-path crates/media-core/Cargo.toml --locked --test analysis real_qwen_semantic_linking_and_rejection -- --include-ignored --nocapture
+        env:
+          AI_CLIPPER_TEST_LLAMA: ${{ github.workspace }}/src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          AI_CLIPPER_TEST_QWEN_ROOT: ${{ runner.temp }}/qwen-data
+          AI_CLIPPER_TEST_TRANSCRIPT: ${{ runner.temp }}/speech-fixture/real-english-transcript.json
   macos-arm64:
-    needs: [frontend, media-tests, speech-tests]
+    needs: [frontend, media-tests, speech-tests, scene-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel
@@ -82,10 +134,29 @@ jobs:
           components: rustfmt
       - run: npm ci
       - run: npm run build
-      - name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            src-tauri/binaries/*-apple-darwin
+            src-tauri/third-party/
+          key: macos-native-${{ hashFiles('scripts/build-ffmpeg-macos.sh', 'scripts/build-whisper.sh', 'scripts/build-llama.sh', 'licenses/*') }}
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
         run: bash scripts/build-ffmpeg-macos.sh
-      - name: Build static whisper.cpp with embedded Metal support
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build static whisper.cpp with embedded Metal support
         run: bash scripts/build-whisper.sh
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        name: Build static llama.cpp with embedded Metal support
+        run: bash scripts/build-llama.sh
+      - if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            src-tauri/binaries/*-apple-darwin
+            src-tauri/third-party/
+          key: macos-native-${{ hashFiles('scripts/build-ffmpeg-macos.sh', 'scripts/build-whisper.sh', 'scripts/build-llama.sh', 'licenses/*') }}
       - name: Smoke-test bundled Intel FFmpeg filter graph
         run: |
           src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_entries format=duration -of json tests/fixtures/sample.mp4
@@ -105,8 +176,10 @@ jobs:
           mkdir -p "$smoke_dir"
           cp src-tauri/target/debug/ai-clipper "$smoke_dir/ai-clipper"
           cp src-tauri/binaries/whisper-cli-x86_64-apple-darwin "$smoke_dir/whisper-cli"
+          cp src-tauri/binaries/llama-completion-x86_64-apple-darwin "$smoke_dir/llama-completion"
           cd "$RUNNER_TEMP"
           "$smoke_dir/ai-clipper" --check-whisper
+          "$smoke_dir/ai-clipper" --check-llama
       - name: Build ad-hoc signed Apple Silicon application
         run: npm run tauri -- build --target aarch64-apple-darwin
         env:
@@ -121,15 +194,30 @@ jobs:
           file "$executable_path"
           test "$(lipo -archs "$executable_path")" = "arm64"
           codesign --verify --deep --strict "$app_path"
-          for tool in ffmpeg ffprobe whisper-cli; do
+          for tool in ffmpeg ffprobe whisper-cli llama-completion; do
             test "$(lipo -archs "$app_path/Contents/MacOS/$tool")" = "arm64"
             codesign --verify --strict "$app_path/Contents/MacOS/$tool"
           done
           test -s "$app_path/Contents/Resources/third-party/ffmpeg-source.tar.gz"
           test -s "$app_path/Contents/Resources/third-party/FFmpeg-LGPL-2.1.txt"
           test -s "$app_path/Contents/Resources/third-party/Whisper-MIT-LICENSE.txt"
+          test -s "$app_path/Contents/Resources/third-party/Llama-MIT-LICENSE.txt"
+          test -s "$app_path/Contents/Resources/third-party/Qwen-Apache-2.0.txt"
           for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg_path"
+            mount_dir="$RUNNER_TEMP/AI Clipper mounted"
+            mkdir -p "$mount_dir"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg_path"
+            test "$(lipo -archs "$mount_dir/AI Clipper.app/Contents/MacOS/llama-completion")" = "arm64"
+            # Intel cannot execute ARM64. Test the DMG bundle layout using host binaries
+            # in a separate copy; never mutate the delivered ARM64 application.
+            package_smoke="$RUNNER_TEMP/AI Clipper package smoke.app"
+            ditto "$mount_dir/AI Clipper.app" "$package_smoke"
+            hdiutil detach "$mount_dir"
+            cp src-tauri/target/debug/ai-clipper "$package_smoke/Contents/MacOS/$executable_name"
+            cp src-tauri/binaries/llama-completion-x86_64-apple-darwin "$package_smoke/Contents/MacOS/llama-completion"
+            codesign --force --deep --sign - "$package_smoke"
+            (cd "$RUNNER_TEMP" && "$package_smoke/Contents/MacOS/$executable_name" --check-llama)
           done
       - uses: actions/upload-artifact@v4
         with:

@@ -1,4 +1,7 @@
+pub mod analysis;
+pub mod audio;
 pub mod models;
+pub mod scenes;
 pub mod transcription;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -165,7 +168,7 @@ pub(crate) fn run(
     let status = status.map_err(|e| e.to_string())?;
     if !status.success() {
         return Err(format!(
-            "Videoverarbeitung fehlgeschlagen: {}",
+            "Lokale Verarbeitung fehlgeschlagen ({status}): {}",
             String::from_utf8_lossy(&errors)
         ));
     }
