@@ -39,7 +39,7 @@ jobs:
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
-      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel
+      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel --skip real_qwen_semantic_linking_and_rejection
         env:
           AI_CLIPPER_TEST_FFMPEG: /usr/bin/ffmpeg
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
@@ -64,8 +64,27 @@ jobs:
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
           AI_CLIPPER_TEST_WHISPER: ${{ github.workspace }}/src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
           AI_CLIPPER_TEST_MODEL_ROOT: ${{ runner.temp }}/whisper-data
+  scene-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native inference build tools
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get install -y --no-install-recommends cmake build-essential
+      - run: bash scripts/build-llama.sh
+      - name: Download and verify pinned Qwen with the actual app downloader
+        run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/qwen-data" qwen
+      - name: Actual Qwen inference, distant relationship and unrelated negative control
+        run: cargo test --manifest-path crates/media-core/Cargo.toml --locked --test analysis real_qwen_semantic_linking_and_rejection -- --include-ignored --nocapture
+        env:
+          AI_CLIPPER_TEST_LLAMA: ${{ github.workspace }}/src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          AI_CLIPPER_TEST_QWEN_ROOT: ${{ runner.temp }}/qwen-data
   macos-arm64:
-    needs: [frontend, media-tests, speech-tests]
+    needs: [frontend, media-tests, speech-tests, scene-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel
@@ -86,6 +105,8 @@ jobs:
         run: bash scripts/build-ffmpeg-macos.sh
       - name: Build static whisper.cpp with embedded Metal support
         run: bash scripts/build-whisper.sh
+      - name: Build static llama.cpp with embedded Metal support
+        run: bash scripts/build-llama.sh
       - name: Smoke-test bundled Intel FFmpeg filter graph
         run: |
           src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_entries format=duration -of json tests/fixtures/sample.mp4
@@ -105,8 +126,10 @@ jobs:
           mkdir -p "$smoke_dir"
           cp src-tauri/target/debug/ai-clipper "$smoke_dir/ai-clipper"
           cp src-tauri/binaries/whisper-cli-x86_64-apple-darwin "$smoke_dir/whisper-cli"
+          cp src-tauri/binaries/llama-completion-x86_64-apple-darwin "$smoke_dir/llama-completion"
           cd "$RUNNER_TEMP"
           "$smoke_dir/ai-clipper" --check-whisper
+          "$smoke_dir/ai-clipper" --check-llama
       - name: Build ad-hoc signed Apple Silicon application
         run: npm run tauri -- build --target aarch64-apple-darwin
         env:
@@ -121,13 +144,15 @@ jobs:
           file "$executable_path"
           test "$(lipo -archs "$executable_path")" = "arm64"
           codesign --verify --deep --strict "$app_path"
-          for tool in ffmpeg ffprobe whisper-cli; do
+          for tool in ffmpeg ffprobe whisper-cli llama-completion; do
             test "$(lipo -archs "$app_path/Contents/MacOS/$tool")" = "arm64"
             codesign --verify --strict "$app_path/Contents/MacOS/$tool"
           done
           test -s "$app_path/Contents/Resources/third-party/ffmpeg-source.tar.gz"
           test -s "$app_path/Contents/Resources/third-party/FFmpeg-LGPL-2.1.txt"
           test -s "$app_path/Contents/Resources/third-party/Whisper-MIT-LICENSE.txt"
+          test -s "$app_path/Contents/Resources/third-party/Llama-MIT-LICENSE.txt"
+          test -s "$app_path/Contents/Resources/third-party/Qwen-Apache-2.0.txt"
           for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg_path"
           done

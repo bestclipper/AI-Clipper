@@ -1,4 +1,4 @@
-use clipper_media::{models, transcription};
+use clipper_media::{analysis, models, transcription};
 use clipper_media::{ExportResult, MediaInfo, Progress, Tools};
 use std::{
     path::{Path, PathBuf},
@@ -136,6 +136,109 @@ async fn transcribe_video(
     .await
     .map_err(|e| e.to_string())?
 }
+pub fn check_bundled_llama() -> Result<(), String> {
+    analysis::check_llama(&binary_path("llama-completion")?)
+}
+#[tauri::command]
+async fn analysis_status(app: tauri::AppHandle) -> Result<AsrStatus, String> {
+    let root = data_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let health = check_bundled_llama();
+        Ok(AsrStatus {
+            model: models::spec_status(&root, models::QWEN),
+            component_ready: health.is_ok(),
+            component_error: health.err(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn download_qwen_model(
+    app: tauri::AppHandle,
+    on_progress: Channel<models::ModelProgress>,
+) -> Result<models::ModelStatus, String> {
+    let root = data_root(&app)?;
+    let (_guard, cancel) = begin_operation(&app)?;
+    models::download_spec(&root, models::QWEN, &cancel, |p| {
+        if on_progress.send(p).is_err() {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    })
+    .await
+}
+#[tauri::command]
+async fn load_analysis(
+    app: tauri::AppHandle,
+    source_path: String,
+) -> Result<Option<analysis::Analysis>, String> {
+    let source = checked_source(&app, &source_path)?;
+    let root = data_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        match transcription::load_transcript(&root, &source)? {
+            Some(t) => analysis::load(&root, &t),
+            None => Ok(None),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn analyze_video(
+    app: tauri::AppHandle,
+    source_path: String,
+    on_progress: Channel<analysis::AnalysisProgress>,
+) -> Result<analysis::Analysis, String> {
+    let source = checked_source(&app, &source_path)?;
+    let root = data_root(&app)?;
+    let (guard, cancel) = begin_operation(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let model = models::spec_path(&root, models::QWEN);
+        models::verify_file(&model, models::QWEN.bytes, models::QWEN.sha256, &cancel)?;
+        let tools = tools()?;
+        let transcript = match transcription::load_transcript(&root, &source)? {
+            Some(t) => t,
+            None => transcription::transcribe(
+                &tools,
+                &binary_path("whisper-cli")?,
+                &root,
+                &source,
+                &cancel,
+                |p| {
+                    if on_progress
+                        .send(analysis::AnalysisProgress {
+                            phase: "transcribing".into(),
+                            percent: 0.,
+                            message: format!(
+                                "Vorbereitung: englische Transkription {:.0} %",
+                                p.percent
+                            ),
+                        })
+                        .is_err()
+                    {
+                        cancel.store(true, Ordering::SeqCst);
+                    }
+                },
+            )?,
+        };
+        analysis::analyze(
+            &tools,
+            &binary_path("llama-completion")?,
+            &root,
+            &source,
+            &transcript,
+            &cancel,
+            |p| {
+                if on_progress.send(p).is_err() {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 fn tools() -> Result<Tools, String> {
     let directory = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -239,7 +342,11 @@ pub fn run() {
             download_whisper_model,
             cancel_operation,
             load_transcript,
-            transcribe_video
+            transcribe_video,
+            analysis_status,
+            download_qwen_model,
+            load_analysis,
+            analyze_video
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -1,4 +1,7 @@
+pub mod analysis;
+pub mod audio;
 pub mod models;
+pub mod scenes;
 pub mod transcription;
 use serde::{Deserialize, Serialize};
 use std::{

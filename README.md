@@ -127,3 +127,64 @@ Die echten FFmpeg-Integrationstests sind explizit markiert und werden in CI mit 
 `crates/media-core` enthält die unabhängig von Tauri testbare Prozesssteuerung, den Schnitt und die Exportprüfung. `src-tauri` prüft Dateiberechtigungen, öffnet den Exportordnerdialog und begrenzt gleichzeitige Exporte. `src/ExportPanel.tsx` bietet Auswahl, Fortschritt und Ergebnis. Die spätere automatische Fünf-Clip-Pipeline bleibt in `src/pipeline.ts` vorbereitet.
 
 Tatsächlich ausgeführte Prüfungen und die M1-Abnahmeliste stehen in [VALIDATION.md](VALIDATION.md).
+
+## Phase 4 · lokale Szenenanalyse
+
+Nach dem Videoimport im Bereich **KI-Analyse · Szenenvorschläge** das kostenlose
+Qwen-Modell herunterladen (einmalig 1,28 GB). Whisper base.en muss ebenfalls
+installiert sein. **KI-Analyse starten** erstellt bei Bedarf zuerst das englische
+Transkript und analysiert dann das gesamte Video. Keine Terminal-Installation,
+kein API-Schlüssel und kein Video-Upload. Nach dem Modelldownload offline nutzbar.
+
+- **Single Scene:** ein zusammenhängender Originalabschnitt mit 61–90 Sekunden.
+- **Smart Story:** 2–5 chronologische, nicht überlappende Originalabschnitte,
+  zusammen 61–90 Sekunden, möglichst nahe 75 Sekunden. Erst Ereignisse in
+  überlappenden Fenstern erkennen, dann globale Themen und konkrete Aussagen
+  vergleichen. Eine zweite Qwen-Abfrage muss Zusammenhang und Verständlichkeit
+  anhand der Originalaussagen begründen. Unbelegte oder unpassende Vorschläge
+  werden verworfen; zehn Treffer werden nicht erzwungen.
+- Die Liste ist nach Score sortiert. Details enthalten Originalzeiten,
+  englischen Titel, Kategorie, Begründung, Belegzitate und Einzelbewertungen.
+  **Smart Story als Playlist ansehen** spielt die Teile im Originalvideo ab
+  und überspringt die Lücken. Es wird keine zusammengesetzte MP4 gerendert.
+- Abbruch beendet den Kindprozess und räumt temporäre Dateien auf. Erneuter
+  Import derselben unveränderten Datei stellt Ergebnisse wieder her.
+  **KI-Analyse fortsetzen** nutzt abgeschlossene Fenster und Bewertungen weiter.
+
+### Modell, Ressourcen und Grenzen
+
+llama.cpp wird statisch mit eingebettetem Metal in der App gebündelt. Verwendet
+wird **Qwen3 1.7B GGUF Q4_K_M**, 1.282.439.264 Bytes, Apache 2.0,
+Quantisierung vom llama.cpp-Team `ggml-org`. Downloadquelle und SHA-256 sind in
+`crates/media-core/src/models.rs` fest an einen Repository-Commit gebunden;
+Dateigröße und vollständiger SHA-256 werden vor Verwendung geprüft.
+Originalmodell: <https://huggingface.co/Qwen/Qwen3-1.7B>.
+Quantisierung: <https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/tree/daeb8e2d528a760970442092f6bf1e55c3b659eb>.
+
+Ein gemeinsamer Backend-Lock verhindert parallele Whisper-, Qwen- und
+Exportprozesse. Kontext 4096 Tokens, vier Threads, kleine Batches, mmap,
+keine vollständigen Video- oder Audiokopien im RAM. Audio wird abschnittsweise
+(maximal fünf Minuten) als mono 16-kHz-PCM analysiert. RMS, Spitzen, Änderungen
+und Stille sind Zusatzsignale; kein verlässlicher Lach-/Sprecherwechseldetektor.
+Jede Inferenz beendet ihren Prozess und gibt Modellressourcen frei; bei
+Metal-Problemen einmaliger CPU-Fallback. Auf dem M1 kann dies lange dauern.
+
+Alle Transkriptfenster werden verarbeitet. Für begrenzten Aufwand bleiben maximal
+256 zeitlich verteilte Ereignisse, 32 Anker und 96 Bewertungskandidaten erhalten.
+Globale Nachbarn werden mit semantischen Modellbeschreibungen vorgefiltert;
+dadurch können Beziehungen übersehen werden. Dies ist keine Garantie, jeden
+besten Moment oder jede irreführende Kombination zu erkennen. Scores (1–10)
+sind KI-Einschätzungen, keine Viralitätswahrscheinlichkeit: Unterhaltung 25 %,
+Überraschung/Emotion 20 %, Hook 20 %, Klarheit 15 %, Spannung 10 %, Abschluss
+10 %. Smart Story wird zusätzlich durch die schwächste Verbindung begrenzt und
+leicht pro zusätzlichem Schnitt abgewertet. Mehr Segmente bringen keinen Bonus.
+
+Schnittgrenzen stammen ausschließlich aus Whisper-Segment-/Wortzeiten,
+möglichst an Satzenden. Diese Zeiten bleiben ungeprüfte Näherungen.
+Keine erfundenen Sekunden und keine verdeckte Verlängerung zu kurzer Szenen.
+Daten liegen in `~/Library/Application Support/com.aiclipper.desktop/`
+(`models`, `transcripts`, `analyses`). Kein Upload, keine Telemetrie.
+
+Phase 5 folgt später: mehrteiliger MP4-Export, automatische Endauswahl und
+Stapelverarbeitung sowie Untertitel im exportierten Video. Der bisherige
+manuelle 9:16-Testexport und die Transkription bleiben verfügbar.

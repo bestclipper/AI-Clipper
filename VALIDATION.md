@@ -38,3 +38,15 @@ Das tatsächliche Ergebnis des nativen Builds und der Downloadlink werden im Pha
 - Metal-Verhalten und CPU-Fallback auf dem tatsächlichen M1 prüfen. Ein empirischer Phase-3-RAM-/Geschwindigkeitswert wird ohne diesen Gerätetest nicht behauptet.
 
 Erzwungenes Beenden/Stromausfall kann temporäre Dateien hinterlassen. Die Quellzuordnung ist ein effizienter Fingerabdruck aus Pfad, Dateimetadaten und Dateirändern; sie ist kein vollständiger Video-Hash und keine automatische Umzugserkennung.
+
+## Phase 4 (work in progress)
+
+Local checks and CI results will be updated before completion. The real Qwen
+model cannot be downloaded in this restricted Codex Cloud environment; the
+free GitHub Actions `scene-tests` job performs the actual download, integrity
+check and inference. Frontend native IPC mocks test UI contracts, not inference.
+The Intel macOS runner executes the actual application binary in a standalone
+`.app/Contents/MacOS` layout to start its bundled llama.cpp component; ARM64
+architecture, signatures, resources and DMG integrity are checked separately.
+Actual M1 GUI inference, Metal utilization and peak memory cannot be verified
+on an Intel runner and require an installed-app check on the M1.

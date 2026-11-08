@@ -343,8 +343,9 @@ export default function TranscriptionPanel({
           Einmaliger kostenloser Modell-Download. Danach offline nutzbar. Pro
           Vorgang läuft nur ein Modellprozess; Audio wird in Abschnitten von
           höchstens fünf Minuten verarbeitet. Erneuter Import derselben
-          unveränderten Videodatei stellt das Transkript wieder her. Noch keine
-          Szenenauswahl oder Untertitel-Erstellung.
+          unveränderten Videodatei stellt das Transkript wieder her.
+          Szenenvorschläge findest du unten in der KI-Analyse. Noch keine
+          Untertitel-Erstellung.
         </p>
       </div>
     </section>

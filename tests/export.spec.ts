@@ -32,6 +32,18 @@ test.beforeEach(async ({ page }) => {
             componentReady: true,
             componentError: null,
           };
+        if (command === "load_analysis") return null;
+        if (command === "analysis_status")
+          return {
+            model: {
+              id: "Qwen3-1.7B-Q4_K_M",
+              ready: false,
+              bytes: 1282439264,
+              sha256: "test",
+            },
+            componentReady: true,
+            componentError: null,
+          };
         if (command === "load_transcript") return null;
         if (command === "probe_source")
           return { duration: 120, width: 320, height: 180, hasAudio: true };

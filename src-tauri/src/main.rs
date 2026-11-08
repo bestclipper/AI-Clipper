@@ -10,5 +10,15 @@ fn main() {
         }
         return;
     }
+    if std::env::args().any(|arg| arg == "--check-llama") {
+        match ai_clipper_lib::check_bundled_llama() {
+            Ok(()) => println!("Bundled llama.cpp started successfully"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     ai_clipper_lib::run();
 }
