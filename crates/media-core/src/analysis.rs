@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,9 +103,48 @@ fn string() -> Value {
 fn number() -> Value {
     json!({"type":"number","minimum":1,"maximum":10})
 }
-fn events_schema(ids: &[usize]) -> Value {
+// Grammar may select only verbatim source quotes, never invented evidence or JSON wrappers.
+fn quote_choices(units: &[Unit], ids: &[usize]) -> Vec<String> {
+    let mut choices = Vec::new();
+    for id in ids {
+        let text = units[*id].text.trim();
+        if (8..=240).contains(&text.len()) {
+            choices.push(text.to_string());
+        }
+        for sentence in text.split_inclusive(['.', '?', '!']) {
+            let mut rest = sentence.trim();
+            while rest.len() > 240 {
+                let end = rest
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .take_while(|i| *i <= 240)
+                    .last()
+                    .unwrap_or(0);
+                let end = rest[..end]
+                    .rfind(char::is_whitespace)
+                    .filter(|i| *i >= 8)
+                    .unwrap_or(end);
+                if end == 0 {
+                    break;
+                }
+                let piece = rest[..end].trim();
+                if piece.len() >= 8 {
+                    choices.push(piece.to_string());
+                }
+                rest = rest[end..].trim();
+            }
+            if rest.len() >= 8 {
+                choices.push(rest.to_string());
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    choices.retain(|q| seen.insert(q.clone()));
+    choices
+}
+fn events_schema(ids: &[usize], quotes: &[String]) -> Value {
     object(
-        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","enum":ids},"last":{"type":"integer","enum":ids},"summary":string(),"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":string()}))}}),
+        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","enum":ids},"last":{"type":"integer","enum":ids},"summary":string(),"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":{"type":"string","enum":quotes}}))}}),
     )
 }
 fn judgment_schema() -> Value {
@@ -224,8 +263,19 @@ impl Llama<'_> {
         struct Output {
             events: Vec<Event>,
         }
-        let output: Output = serde_json::from_value(self.infer(&prompt, &events_schema(ids))?)
-            .map_err(|_| "Ungültige Ereignisantwort der KI.")?;
+        let quotes = quote_choices(units, ids);
+        if quotes.is_empty() {
+            return Ok(DetectionReport {
+                events: vec![],
+                proposed: 0,
+                invalid_ids: 0,
+                invalid_quotes: 0,
+                invalid_duration: 0,
+            });
+        }
+        let output: Output =
+            serde_json::from_value(self.infer(&prompt, &events_schema(ids, &quotes))?)
+                .map_err(|_| "Ungültige Ereignisantwort der KI.")?;
         let mut report = DetectionReport {
             events: vec![],
             proposed: output.events.len(),
@@ -273,10 +323,21 @@ impl Llama<'_> {
 
     pub fn judge(&mut self, plan: &Plan, units: &[Unit]) -> Result<Judgment, String> {
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
-        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events. Distinguish future promises from completed actions: a promise to wear a costume tomorrow does not mean the costume has already been worn. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
-        let mut judgment: Judgment =
-            serde_json::from_value(self.infer(&prompt, &judgment_schema())?)
-                .map_err(|_| "Ungültige Clip-Bewertung der KI.")?;
+        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events. Distinguish promises and hypothetical actions from completed actions. Do not describe a future commitment as already fulfilled. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let mut schema = judgment_schema();
+        let options = plan
+            .parts
+            .iter()
+            .map(|part| quote_choices(units, &(part.first..=part.last).collect::<Vec<_>>()))
+            .collect::<Vec<_>>();
+        if options.iter().any(Vec::is_empty) {
+            return Err(
+                "Ausgewählter Abschnitt enthält keine ausreichend lange Originalaussage.".into(),
+            );
+        }
+        schema["properties"]["evidence"] = json!({"type":"array","prefixItems":options.iter().map(|quotes|json!({"type":"string","enum":quotes})).collect::<Vec<_>>(),"minItems":plan.parts.len(),"maxItems":plan.parts.len()});
+        let mut judgment: Judgment = serde_json::from_value(self.infer(&prompt, &schema)?)
+            .map_err(|_| "Ungültige Clip-Bewertung der KI.")?;
         for (part, quote) in plan.parts.iter().zip(judgment.evidence.iter_mut()) {
             if let Some(source) = scenes::span_text(units, part) {
                 if let Some(corrected) = scenes::grounded_quote(quote, &source) {
@@ -428,6 +489,29 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("evidence")));
+    }
+    #[test]
+    fn evidence_grammar_contains_only_verbatim_source_choices() {
+        let u = vec![Unit {
+            id: 0,
+            start: 0.,
+            end: 70.,
+            text: "A real source sentence with a quoted word: \"tomorrow\". ".repeat(12),
+            approximate: true,
+        }];
+        let quotes = quote_choices(&u, &[0]);
+        assert!(!quotes.is_empty());
+        assert!(quotes
+            .iter()
+            .all(|q| q.len() <= 240 && u[0].text.contains(q)));
+        let schema = events_schema(&[0], &quotes);
+        assert_eq!(
+            schema["properties"]["events"]["items"]["properties"]["evidence"]["enum"]
+                .as_array()
+                .unwrap()
+                .len(),
+            quotes.len()
+        );
     }
     #[test]
     fn cache_key_invalidates_when_transcript_changes() {
