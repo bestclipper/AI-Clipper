@@ -1,53 +1,40 @@
-# Prüfbericht · Phase 2 (v0.2.0)
+# Prüfbericht · Phase 3 / v0.3.0
 
-Entwicklung und Befehle ausschließlich in Codex Cloud. Phase 1 wurde vom Nutzer auf dem MacBook Air M1 mit 8 GB erfolgreich getestet: App-Start, Import und Vorschau.
+Stand: 8. November 2026. Alle Entwicklungsbefehle in Codex Cloud und GitHub Actions, keine Befehle auf dem Mac des Nutzers. Phase 1 und 2 wurden vom Nutzer auf einem MacBook Air M1 mit 8 GB erfolgreich abgenommen, inklusive 9:16-MP4-Export.
 
 ## In Codex Cloud ausgeführt
 
-| Prüfung | Ergebnis |
-| --- | --- |
-| TypeScript und Vite-Produktionsbuild | erfolgreich |
-| Frontend-Unit-Tests | 7 erfolgreich |
-| Browser-Integrationstests | 5 erfolgreich mit installiertem Chromium |
-| Rust-Medienkern-Unit-Tests | 2 erfolgreich |
-| Echte FFmpeg-Integrationstests | 2 erfolgreich, explizit mit `--include-ignored` |
-| Rust-Formatierung, Prettier, Shellsyntax und Git-Diff-Prüfung | erfolgreich |
-| Vollständige native Tauri-App / ARM64-DMG | Prüfung durch neuen macOS-CI-Lauf; Ergebnis im Pull Request |
+- TypeScript und Vite-Produktionsbuild: erfolgreich.
+- Frontend-Unit-Tests: 9 erfolgreich.
+- Browser-Integrationstests: 9 erfolgreich (Import, Wiedergabe, Export-UI, Download-UI, Abbruch, Transkriptanzeige, Zeitsprung und Wiederherstellung).
+- Rust-Kerntests: SHA-256/Größenprüfung, fehlende/beschädigte Modelle, Zeitstempel, lange Audioabschnittspläne, atomare Speicherung/Wiederherstellung und Beenden eines laufenden Prozesses.
+- Echte FFmpeg-Tests: bisheriger H.264/AAC-Export sowie Mono-16-kHz-PCM-Extraktion aus einer über 300 Sekunden langen Videoquelle; beschädigte Eingaben und Bereinigung geprüft.
+- whisper.cpp v1.8.7 aus festgeschriebenem Quellcode unter Linux erfolgreich gebaut und `whisper-cli --version` gestartet.
+- Rust-Formatierung, Prettier, Shellsyntax und Git-Diff-Prüfung.
 
-Die Browsertests decken weiterhin Import, Wiedergabe, Dateiwechsel und Fehler ab. Neue UI-Vertragstests simulieren die Tauri-Brücke für Fortschritt, Sperren der Eingaben, Fehler, Ordnerdialog-Abbruch und Export-Abbruch. **Sie führen selbst kein FFmpeg aus**.
+Browser-Vertragstests simulieren ausschließlich die Tauri-Brücke. Die echten Medien-/Spracherkennungstests sind davon getrennt. Ein Hugging-Face-Abruf aus dieser Cloud wurde mit HTTP 403 durch die Umgebungsrichtlinie abgelehnt. Es wurde keine Umgehung eingerichtet. Der tatsächliche Modell-Download und die englische Erkennung laufen deshalb im separaten GitHub-Speech-Job.
 
-Die getrennten Rust-Integrationstests führen echtes FFmpeg/FFprobe unter Linux aus: synthetische 63-Sekunden-Quellen mit und ohne AAC-Ton, Landschafts- und Hochkantformat, Zuschnitt auf 1080 × 1920, 61-Sekunden-H.264-Export, Metadatenprüfung und vollständige Dekodierung. Zusätzlich werden Fortschritt, Abbruch eines laufenden Prozesses, Bereinigung, beschädigte Dateien, ungültige Zeitbereiche, Dateinamen mit Leerzeichen und Schutz vorhandener Dateien geprüft. Linux verwendet den Softwareencoder libx264 zum Testen. Die ausgelieferte App verwendet VideoToolbox und enthält keinen libx264-Encoder.
+## Verpflichtende GitHub-Prüfungen
 
-Befehle in dieser Cloud:
+1. Frontend: alle bisherigen und neuen Unit-/Browsertests.
+2. Medienkern: Rust-Tests und echte FFmpeg-Exporte/Audioextraktion.
+3. Speech: echte base.en-Datei mit dem **Downloader der Anwendung** herunterladen, Bytezahl und SHA-256 prüfen; JFK-Sprachaufnahme zu einem Video verarbeiten; tatsächliches whisper.cpp ausführen. Erwartete englische Wörter („ask not“, „country“), Zeitstempel und vorhandene Wortzeiten prüfen. Dasselbe Video in mehreren kleinen Abschnitten transkribieren, globale Zeitstempel und Speichern/Laden prüfen. Neulauf abbrechen und Erhalt des alten Transkripts sowie entfernte Temporärdateien bestätigen. Fehlendes Modell muss eine Fehlermeldung ergeben.
+4. macos-15-intel: FFmpeg/FFprobe einschließlich WAV-Muxer und whisper.cpp mit statisch eingebettetem Metal-Backend für Intel und ARM64 bauen. Keine fremden Homebrew-/OpenMP-Dylibs zulassen.
+5. Mitgeliefertes FFmpeg muss tatsächlich Mono-16-kHz-PCM-WAV erzeugen können.
+6. Das native App-Programm wird in einer isolierten `.app/Contents/MacOS`-Struktur aus einem fremden Arbeitsverzeichnis mit `--check-whisper` ausgeführt und muss sein Whisper-Sidecar erfolgreich starten. Diese Diagnose verwendet dieselbe Pfadauflösung wie die eigentliche Transkription und die UI-Komponentenprüfung.
+7. ARM64-App erstellen, Architektur und Ad-hoc-Signaturen für App/FFmpeg/FFprobe/Whisper prüfen; Quell-/Lizenzressourcen und DMG-Integrität prüfen; neues DMG als Artefakt hochladen.
 
-```sh
-npm test
-npm run build
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e
-AI_CLIPPER_TEST_FFMPEG=/usr/bin/ffmpeg AI_CLIPPER_TEST_FFPROBE=/usr/bin/ffprobe \
-  cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
-```
+Das tatsächliche Ergebnis des nativen Builds und der Downloadlink werden im Phase-3-Pull-Request dokumentiert. Der Intel-Runner kann die ARM64-App nicht ausführen und bietet keinen M1-Metal-Laufzeittest.
 
-## Verpflichtende CI-Prüfungen
+## M1-Abnahme der installierten DMG
 
-- Ubuntu: Frontend-Tests, Browsertests und alle echten FFmpeg-Integrationstests.
-- macos-15-intel: FFmpeg n8.0.3 aus festgeschriebenem Commit mit verifiziertem SHA-256 bauen, Intel-/ARM64-Architekturen und Systembibliotheksabhängigkeiten prüfen.
-- Mitgelieferte Intel-Werkzeuge starten, FFprobe und den tatsächlichen Crop-/Scale-/Audiofilter mit der Testdatei prüfen, ohne einen VM-Hardwareencoder vorauszusetzen.
-- Native Tauri-Kompilierung und Rust-Prüfungen auf Intel; Cross-Build für aarch64-apple-darwin.
-- App, FFmpeg und FFprobe müssen reine ARM64-Binaries und ad-hoc signiert sein. Die vollständigen FFmpeg-Quellen und Lizenzdateien müssen in der App liegen. DMG-Prüfsumme muss gültig sein.
+- Neue App im Finder installieren. Die UI muss „whisper.cpp wurde von der App erfolgreich gestartet“ anzeigen.
+- base.en grafisch herunterladen: Fortschritt, Abbruch, erneuter Versuch und erfolgreiche Integritätsprüfung testen.
+- Englischsprachiges Video importieren und transkribieren. Prüfen, ob Text und Anfang/Ende der Segmente plausibel sind. Wortzeiten sind ausdrücklich nur ungefähr.
+- Auf Segment-/Wortzeiten klicken und zur richtigen Stelle im Video springen. Vorhandenen MP4-Export erneut testen.
+- App schließen, erneut starten und dasselbe unveränderte Video importieren: gespeichertes Transkript muss wieder erscheinen, auch ohne Internet.
+- Langen Stream transkribieren, Fortschritt über mehrere Abschnitte und Speicherverbrauch in der Aktivitätsanzeige prüfen. Es darf nur ein Modellprozess gleichzeitig laufen. Nach Abschluss muss er beendet sein.
+- Transkription abbrechen; erneuter Start muss möglich sein. Vorherige vollständige Transkripte bleiben erhalten. Fehler bei stummer/beschädigter Quelle und vollem Datenträger prüfen.
+- Metal-Verhalten und CPU-Fallback auf dem tatsächlichen M1 prüfen. Ein empirischer Phase-3-RAM-/Geschwindigkeitswert wird ohne diesen Gerätetest nicht behauptet.
 
-Die auf dem Intel-Runner gebauten ARM64-Werkzeuge können dort nicht ausgeführt werden. Ein erfolgreicher Build ersetzt keinen Funktionstest des VideoToolbox-Encoders, des nativen Dateidialogs und der installierten App auf einem echten M1.
-
-## Abnahme auf dem M1
-
-1. Phase-2-DMG installieren und App per Finder starten. Ohne separate FFmpeg-Installation testen.
-2. Lokalen Stream mit mindestens 90 Sekunden und Ton importieren. Einen Abschnitt ab einer Stelle ungleich 0 wählen und 61 Sekunden exportieren. Danach 90 Sekunden testen.
-3. MP4 in QuickTime abspielen: gewünschter Anfang, Originalton, 9:16-Beschnitt, Bild/Ton-Synchronität und vollständiges Ende prüfen.
-4. Stumme, bereits vertikale und gedrehte Quellen prüfen. Der mittige Beschnitt ist beabsichtigt; es gibt noch kein intelligentes Reframing.
-5. Fortschrittsanzeige und Verifikationsphase prüfen. Während des Exports dürfen Quelle und Zeitauswahl nicht gewechselt werden.
-6. Export abbrechen und App danach erneut verwenden. Exportordnerdialog abbrechen. Nicht beschreibbaren/vollen Datenträger prüfen.
-7. Während eines Exports schließen/beenden: zunächst muss abgebrochen und bereinigt werden; anschließend App erneut schließen.
-8. Ohne Internet erneut exportieren. Originaldatei und vorhandene Exporte müssen unverändert bleiben.
-9. Langen hochauflösenden Stream unter Beobachtung des Arbeitsspeichers auf dem M1 mit 8 GB prüfen. Es wird nur ein Exportprozess gestartet; ein empirischer RAM-Höchstwert ist noch nicht nachgewiesen.
-
-Bei erzwungenem Prozessabbruch/Stromausfall kann eine unvollständige Ausgabe liegen bleiben. Ein solches Ergebnis hat keine erfolgreiche Abschlussprüfung erhalten.
+Erzwungenes Beenden/Stromausfall kann temporäre Dateien hinterlassen. Die Quellzuordnung ist ein effizienter Fingerabdruck aus Pfad, Dateimetadaten und Dateirändern; sie ist kein vollständiger Video-Hash und keine automatische Umzugserkennung.

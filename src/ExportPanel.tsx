@@ -9,6 +9,7 @@ import {
   type ExportResult,
 } from "./export";
 interface Props {
+  otherBusy?: boolean;
   sourcePath?: string;
   media: MediaInfo | null;
   currentTime: () => number;
@@ -19,6 +20,7 @@ export default function ExportPanel({
   media,
   currentTime,
   onBusy,
+  otherBusy = false,
 }: Props) {
   const [start, setStart] = useState("0");
   const [duration, setDuration] = useState("61");
@@ -42,7 +44,7 @@ export default function ExportPanel({
     complete: "Export geprüft und abgeschlossen",
   };
   async function exportClip() {
-    if (!ready || active) return;
+    if (!ready || active || otherBusy) return;
     setActive(true);
     onBusy(true);
     setCancelling(false);
@@ -146,7 +148,7 @@ export default function ExportPanel({
           </p>
         )}
         <div className="export-actions">
-          <button disabled={!ready || active} onClick={exportClip}>
+          <button disabled={!ready || active || otherBusy} onClick={exportClip}>
             <Download size={16} /> Abschnitt als MP4 exportieren
           </button>
           {active && (

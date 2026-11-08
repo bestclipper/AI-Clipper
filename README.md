@@ -1,8 +1,41 @@
-# AI Clipper · Phase 2
+# AI Clipper · Phase 3
 
-Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
+Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe und whisper.cpp**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
 
-## Was funktioniert?
+## Phase 3: Englische Transkription
+
+1. Installiere die neue DMG wie unten beschrieben. Keine Entwicklungswerkzeuge oder Terminal-Befehle auf deinem Mac erforderlich.
+2. Im Bereich **KI-Analyse · Englische Transkription** prüft die App automatisch, ob sie die eingebettete Whisper-Komponente starten kann.
+3. Klicke einmal auf **base.en kostenlos herunterladen**. Das englische Modell benötigt etwa **148 MB** Speicherplatz. Downloadfortschritt und anschließende Integritätsprüfung werden angezeigt. Die Installation erfolgt nur, wenn Dateigröße und **SHA-256** zum festgeschriebenen Modell passen. Ein abgebrochener/fehlerhafter Download wird gelöscht und kann erneut gestartet werden.
+4. Importiere ein Video mit englischer Tonspur und klicke **Transkription starten**. FFmpeg extrahiert die erste Tonspur als **Mono-WAV, 16 kHz, PCM 16 Bit**. whisper.cpp transkribiert lokal; es wird keine OpenAI-API und kein Online-Sprachdienst verwendet.
+5. Im Transkript kannst du suchen und auf einen Segment- oder Wortzeitstempel klicken, um den Player dorthin zu bewegen. **Transkription / Download abbrechen** beendet den Vorgang. Ein bereits fertiges Transkript bleibt bei einem abgebrochenen Neulauf erhalten.
+6. Das Transkript wird automatisch lokal gespeichert. Wählst du nach einem Neustart **dieselbe unveränderte Videodatei am selben Ort** erneut aus, wird das zugehörige Transkript wiederhergestellt. Es muss dafür nicht erneut transkribiert werden.
+
+Nach dem einmaligen Modell-Download funktionieren Import, Transkription und Export offline. Für den Download wird ausschließlich die öffentliche Modelldatei von Hugging Face abgerufen; Videos, Audiodaten und Transkripte werden nicht übertragen. Ein Internetzugang ist nur für den Modell-Download nötig.
+
+**Modell:** `base.en`, Standard für 8 GB RAM. Die getrennte Modellverwaltung und das Transkriptformat sind für spätere Modelle vorbereitet; `small.en` wird in dieser Phase noch nicht angeboten. Es wird englische Sprache erkannt, keine Übersetzung anderer Sprachen erstellt.
+
+**Zeitstempel:** Segmentzeiten und besonders Wortzeiten sind automatisch geschätzt. Die Anzeige „Ungefähre Wortzeiten“ kennzeichnet das ausdrücklich. Das JSON enthält `wordsApproximate`, je Wort `approximate`, `alignmentStatus: unreviewed`, Schema-, Modell- und Engine-Version für spätere Synchronisierung/Korrektur. Dies ist noch kein synchronisierter Untertitel-Export. Whisper kann Wörter auslassen oder halluzinieren, besonders bei Musik, Stille, Überlagerungen und Abschnittsgrenzen; prüfe wichtige Stellen am Original.
+
+### Projekte, Dateien und Speicher
+
+Modelle und Transkripte liegen außerhalb der App unter `~/Library/Application Support/com.aiclipper.desktop/`:
+
+- `models/ggml-base.en.bin`: verifiziertes Modell, bleibt beim App-Update erhalten.
+- `projects/<Quellkennung>.json`: vollständiger englischer Text mit Segment- und Wortzeitstempeln.
+- `temporary/`: nur die jeweils benötigten Audio-/JSON-Zwischendateien; automatische Bereinigung bei Erfolg, Fehler und normalem Abbruch.
+
+Die Quellkennung berücksichtigt den kanonischen Pfad, Größe, Änderungszeit sowie die ersten/letzten 64 KiB der Datei. Sie vermeidet einen vollständigen Scan großer Videos. Verschieben oder Ändern eines Videos erzeugt eine neue Zuordnung; vollständige Projektverwaltung und Umzugserkennung sind noch nicht enthalten. Eine beschädigte Projektdatei wird verständlich gemeldet und kann durch erneute Transkription ersetzt werden.
+
+Es läuft **höchstens ein speicherintensiver Vorgang gleichzeitig** (Download, Export oder Transkription). Der Player wird beim Start pausiert. Lange Audiospuren werden in gleichmäßig aufgeteilten Abschnitten von höchstens **300 Sekunden** verarbeitet, jeweils als etwa 9,6 MB WAV. Es gibt keine vollständige Videokopie im RAM. Jeder Whisper-Prozess verwendet vier CPU-Threads, einen Prozessor und Greedy-Decoding; er endet nach seinem Abschnitt und gibt Modell-/GPU-Ressourcen frei. Metal ist auf macOS aktiviert und dessen Shader sind im Programm eingebettet; zusätzliche Metal-Dateien oder Xcode auf deinem Mac sind nicht nötig. Schlägt der GPU-Lauf fehl, wird derselbe Abschnitt einmal im CPU-Modus versucht.
+
+Transkripte werden atomar erst nach vollständigem Erfolg gespeichert. Bei Fehler/Abbruch bleiben vorherige vollständige Ergebnisse erhalten. Nach erzwungenem Beenden/Stromausfall können temporäre Dateien übrig bleiben. Die aktuelle Schutzgrenze liegt bei sieben Tagen Quelldauer bzw. 64 MB Projekt-JSON. Die Oberfläche zeigt anfangs höchstens 100 Segmente; weitere lassen sich einblenden. Ein tatsächlicher M1-RAM-/Geschwindigkeitstest für Phase 3 bleibt erforderlich.
+
+### Was folgt später?
+
+Phase 3 enthält ausschließlich englische Spracherkennung und Transkriptspeicherung. **KI-Szenenerkennung, Ranking und automatische Auswahl der fünf besten Clips gehören zu Phase 4/5.** Der manuelle Testclip-Export aus Phase 2 bleibt vollständig nutzbar.
+
+## Was funktioniert außerdem?
 
 - Lokaler Videoimport und Player mit Dauer und Auflösung.
 - Ein Testclip mit frei wählbarem Start und **61–90 Sekunden** Länge.
@@ -51,7 +84,13 @@ Keine Cloud-API, kein Tracking und keine Videouploads. Die mitgelieferten FFmpeg
 
 ## Formate und Grenzen
 
-Die Dateiendung garantiert keinen kompatiblen Codec. Der FFmpeg-Build enthält native Decoder für verbreitete H.264-/HEVC-/VP8-/VP9-Videos und gängige Audioformate, aber keine externen Codec-Bibliotheken. System-WebView und FFmpeg können unterschiedliche Formate unterstützen. Nicht unterstützte oder beschädigte Quellen erzeugen eine Fehlermeldung. DRM-geschützte Inhalte werden nicht unterstützt. Es werden keine fremden Untertitel eingebrannt und keine neuen Untertitel erzeugt.
+Die Dateiendung garantiert keinen kompatiblen Codec. Der FFmpeg-Build enthält native Decoder für verbreitete H.264-/HEVC-/VP8-/VP9-Videos und gängige Audioformate, aber keine externen Codec-Bibliotheken. System-WebView und FFmpeg können unterschiedliche Formate unterstützen. Nicht unterstützte oder beschädigte Quellen erzeugen eine Fehlermeldung. DRM-geschützte Inhalte werden nicht unterstützt. Der MP4-Export enthält noch keine eingebrannten Untertitel; das Transkript aus Phase 3 wird getrennt gespeichert.
+
+## whisper.cpp im installierten App-Paket
+
+whisper.cpp **v1.8.7**, Commit `48f628a84833905ee4a0658ee6d4a5c915ce1997`, wird aus geprüftem Quellcode statisch gebaut. `whisper-cli` liegt als signiertes ARM64-Sidecar direkt neben dem App-Programm. Keine Homebrew-, Python-, OpenAI- oder separate Whisper-Installation erforderlich. Das Modell wird grafisch in den App-Datenordner geladen, nicht bei jedem Start neu heruntergeladen.
+
+Ein zusätzlicher kostenloser Linux-CI-Job lädt das **echte base.en-Modell mit dem Downloader der App** und erkennt eine englische JFK-Sprachaufnahme. Er prüft Text, Wort-/Segmentzeiten, abschnittsweise Verarbeitung, Speichern/Laden und Abbruch. Auf macOS startet das tatsächlich kompilierte App-Programm seine Whisper-Komponente aus einer isolierten `.app`-Verzeichnisstruktur mit Leerzeichen und ohne Repository als Arbeitsverzeichnis. Der ARM64-Bundlecheck prüft zusätzlich die eingebetteten Werkzeuge und Signaturen. Die Intel-Runner können den ARM64-Metal-Lauf selbst nicht ausführen; dieser bleibt Teil des M1-Abnahmetests.
 
 ## Kostenloser macOS-ARM64-Build
 
@@ -63,7 +102,7 @@ Das Repository ist öffentlich. [GitHub listet `macos-15-intel` als kostenlosen 
 
 ## FFmpeg und Lizenzen
 
-Die Anwendung steht unter MIT. FFmpeg n8.0.3 wird als eigenständiges Werkzeug unter LGPL 2.1 oder später mitgeliefert. GPL-/Nonfree-Komponenten und externe Codec-Bibliotheken sind deaktiviert. Quellcode, Lizenztext und exakte Build-Anleitung liegen in der installierten App unter `Contents/Resources/third-party/`. Details: [THIRD_PARTY.md](THIRD_PARTY.md). Es entstehen keine API- oder Lizenzabonnementkosten.
+Die Anwendung und whisper.cpp stehen unter MIT; die Whisper-Modellgewichte ebenfalls. FFmpeg n8.0.3 wird als eigenständiges Werkzeug unter LGPL 2.1 oder später mitgeliefert. GPL-/Nonfree-Komponenten und externe Codec-Bibliotheken sind deaktiviert. Quellcode, Lizenztext und exakte Build-Anleitung liegen in der installierten App unter `Contents/Resources/third-party/`. Details: [THIRD_PARTY.md](THIRD_PARTY.md). Es entstehen keine API- oder Lizenzabonnementkosten.
 
 ## Entwicklung nur in Codex Cloud
 
@@ -76,10 +115,10 @@ npm run build
 npm run test:e2e
 cargo test --manifest-path crates/media-core/Cargo.toml --locked
 AI_CLIPPER_TEST_FFMPEG=/usr/bin/ffmpeg AI_CLIPPER_TEST_FFPROBE=/usr/bin/ffprobe \
-  cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
+  cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel
 ```
 
-Die echten FFmpeg-Integrationstests sind explizit markiert und werden in CI mit `--include-ignored` verpflichtend ausgeführt. Sie verwenden den Linux-Softwareencoder `libx264` ausschließlich zum Testen; dieser ist nicht in der ausgelieferten App enthalten. Die UI-Vertragstests simulieren die Tauri-Brücke und ersetzen keine native Prüfung.
+Die echten FFmpeg-Integrationstests sind explizit markiert und werden in CI mit `--include-ignored` verpflichtend ausgeführt. Sie verwenden den Linux-Softwareencoder `libx264` ausschließlich zum Testen; dieser ist nicht in der ausgelieferten App enthalten. Die UI-Vertragstests simulieren die Tauri-Brücke und ersetzen keine native Prüfung. Der separate Speech-CI-Job lädt das echte Modell und führt den ausgelassenen ASR-Test verpflichtend aus. In dieser Codex-Cloud-Umgebung ist der Hugging-Face-Download per Netzwerkregel gesperrt; echte ASR-Läufe werden daher auf GitHub geprüft.
 
 `npm run dev` bietet eine Browser-Vorschau mit Dateiimport. Ein Export ist dort deaktiviert und als Mac-App-Funktion gekennzeichnet. Für native Entwicklung müssen die jeweiligen Sidecars zuerst in der passenden Cloud-Umgebung gebaut werden; `scripts/build-ffmpeg-macos.sh` übernimmt das auf macOS. Linux kann kein vollständiges macOS-Paket erzeugen.
 

@@ -22,6 +22,7 @@ import {
   VIDEO_EXTENSIONS,
 } from "./pipeline";
 import ExportPanel from "./ExportPanel";
+import TranscriptionPanel from "./TranscriptionPanel";
 import type { MediaInfo } from "./export";
 type Source = {
   id: number;
@@ -39,6 +40,7 @@ export default function App() {
   } | null>(null);
   const [error, setError] = useState("");
   const [exportBusy, setExportBusy] = useState(false);
+  const [asrBusy, setAsrBusy] = useState(false);
   const [nativeMedia, setNativeMedia] = useState<MediaInfo | null>(null);
   const video = useRef<HTMLVideoElement>(null);
   const [busy, setBusy] = useState(false);
@@ -120,7 +122,7 @@ export default function App() {
           </p>
         </div>
         <div className="device">
-          <span className="dot" /> Apple Silicon <small>Phase 2 · v0.2.0</small>
+          <span className="dot" /> Apple Silicon <small>Phase 3 · v0.3.0</small>
         </div>
       </aside>
       <main>
@@ -142,7 +144,7 @@ export default function App() {
               <p>Importiere deinen Stream und entdecke, was drinsteckt.</p>
             </div>
             <span className="phase">
-              PHASE 02 <span>Lokaler Videoschnitt</span>
+              PHASE 03 <span>Englische Transkription</span>
             </span>
           </div>
           <div className="steps">
@@ -150,7 +152,7 @@ export default function App() {
               <b>1</b> Video importieren
             </div>
             <div className="step">
-              <b>2</b> KI-Analyse <small>Später</small>
+              <b>2</b> <a href="#transcription">Transkription</a>
             </div>
             <div className="step">
               <b>3</b> Testclip exportieren
@@ -212,7 +214,10 @@ export default function App() {
                       <br />
                       Es wird nichts hochgeladen.
                     </p>
-                    <button onClick={importVideo} disabled={busy || exportBusy}>
+                    <button
+                      onClick={importVideo}
+                      disabled={busy || exportBusy || asrBusy}
+                    >
                       <Upload size={16} />{" "}
                       {busy ? "Wird geöffnet …" : "Video auswählen"}
                     </button>
@@ -242,14 +247,14 @@ export default function App() {
                     <button
                       className="secondary"
                       onClick={importVideo}
-                      disabled={busy || exportBusy}
+                      disabled={busy || exportBusy || asrBusy}
                     >
                       Ändern
                     </button>
                     <button
                       className="icon-button"
                       aria-label="Video entfernen"
-                      disabled={exportBusy}
+                      disabled={exportBusy || asrBusy}
                       onClick={() => {
                         setSource(null);
                         setNativeMedia(null);
@@ -314,6 +319,22 @@ export default function App() {
               </button>
             </aside>
           </div>
+          <TranscriptionPanel
+            key={`asr-${source?.id ?? 0}`}
+            sourcePath={source?.nativePath}
+            hasAudio={nativeMedia?.hasAudio}
+            otherBusy={exportBusy || busy}
+            onBusy={(value) => {
+              setAsrBusy(value);
+              if (value) video.current?.pause();
+            }}
+            onSeek={(seconds) => {
+              if (video.current) {
+                video.current.currentTime = seconds;
+                video.current.focus();
+              }
+            }}
+          />
           <ExportPanel
             key={source?.id ?? 0}
             sourcePath={source?.nativePath}
@@ -322,7 +343,11 @@ export default function App() {
               (source?.blob && meta ? { ...meta, hasAudio: false } : null)
             }
             currentTime={() => video.current?.currentTime ?? 0}
-            onBusy={setExportBusy}
+            otherBusy={asrBusy || busy}
+            onBusy={(value) => {
+              setExportBusy(value);
+              if (value) video.current?.pause();
+            }}
           />
           {error && (
             <div role="alert" className="error">

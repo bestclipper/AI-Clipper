@@ -39,12 +39,33 @@ jobs:
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
-      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored
+      - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel
         env:
           AI_CLIPPER_TEST_FFMPEG: /usr/bin/ffmpeg
           AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
+  speech-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install speech test dependencies
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get install -y --no-install-recommends ffmpeg cmake build-essential
+      - run: bash scripts/build-whisper.sh
+      - name: Download and verify the actual base.en model with the app downloader
+        run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/whisper-data"
+      - name: Recognize real English speech and verify persistence and cancellation
+        run: cargo test --manifest-path crates/media-core/Cargo.toml --locked --test transcription real_english_speech_timestamps_restore_chunking_and_cancel -- --include-ignored
+        env:
+          AI_CLIPPER_TEST_FFMPEG: /usr/bin/ffmpeg
+          AI_CLIPPER_TEST_FFPROBE: /usr/bin/ffprobe
+          AI_CLIPPER_TEST_WHISPER: ${{ github.workspace }}/src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
+          AI_CLIPPER_TEST_MODEL_ROOT: ${{ runner.temp }}/whisper-data
   macos-arm64:
-    needs: [frontend, media-tests]
+    needs: [frontend, media-tests, speech-tests]
     # Standard Intel runner: free for this public repository.
     # Cross-compile on macOS with Xcode; the output still targets Apple Silicon.
     runs-on: macos-15-intel
@@ -63,13 +84,29 @@ jobs:
       - run: npm run build
       - name: Build bundled LGPL FFmpeg and FFprobe for Intel and ARM64
         run: bash scripts/build-ffmpeg-macos.sh
+      - name: Build static whisper.cpp with embedded Metal support
+        run: bash scripts/build-whisper.sh
       - name: Smoke-test bundled Intel FFmpeg filter graph
         run: |
           src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_entries format=duration -of json tests/fixtures/sample.mp4
           src-tauri/binaries/ffmpeg-x86_64-apple-darwin -v error -xerror -threads 2 -filter_threads 1 -i tests/fixtures/sample.mp4 -t 2 -vf "scale=w='ceil(iw*sar/2)*2':h=ih,setsar=1,crop=w='floor(min(iw,ih*9/16)/2)*2':h='floor(min(ih,iw*16/9)/2)*2':x='(iw-ow)/2':y='(ih-oh)/2',scale=1080:1920:flags=bilinear,setsar=1,fps=30" -af apad -f null -
+      - name: Verify bundled audio extraction for Whisper
+        run: |
+          src-tauri/binaries/ffmpeg-x86_64-apple-darwin -v error -i tests/fixtures/sample.mp4 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f wav "$RUNNER_TEMP/whisper-audio.wav"
+          src-tauri/binaries/ffprobe-x86_64-apple-darwin -v error -show_streams -of json "$RUNNER_TEMP/whisper-audio.wav" > "$RUNNER_TEMP/audio-info.json"
+          node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1])).streams[0]; if(s.sample_rate!=="16000"||s.channels!==1||s.codec_name!=="pcm_s16le") process.exit(1)' "$RUNNER_TEMP/audio-info.json"
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       # Run tests on the Intel host; ARM64 test binaries cannot run here.
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Verify the actual application can start its Whisper sidecar
+        run: |
+          cargo build --manifest-path src-tauri/Cargo.toml --locked
+          smoke_dir="$RUNNER_TEMP/AI Clipper smoke.app/Contents/MacOS"
+          mkdir -p "$smoke_dir"
+          cp src-tauri/target/debug/ai-clipper "$smoke_dir/ai-clipper"
+          cp src-tauri/binaries/whisper-cli-x86_64-apple-darwin "$smoke_dir/whisper-cli"
+          cd "$RUNNER_TEMP"
+          "$smoke_dir/ai-clipper" --check-whisper
       - name: Build ad-hoc signed Apple Silicon application
         run: npm run tauri -- build --target aarch64-apple-darwin
         env:
@@ -84,12 +121,13 @@ jobs:
           file "$executable_path"
           test "$(lipo -archs "$executable_path")" = "arm64"
           codesign --verify --deep --strict "$app_path"
-          for tool in ffmpeg ffprobe; do
+          for tool in ffmpeg ffprobe whisper-cli; do
             test "$(lipo -archs "$app_path/Contents/MacOS/$tool")" = "arm64"
             codesign --verify --strict "$app_path/Contents/MacOS/$tool"
           done
           test -s "$app_path/Contents/Resources/third-party/ffmpeg-source.tar.gz"
           test -s "$app_path/Contents/Resources/third-party/FFmpeg-LGPL-2.1.txt"
+          test -s "$app_path/Contents/Resources/third-party/Whisper-MIT-LICENSE.txt"
           for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg_path"
           done

@@ -33,7 +33,7 @@ for TARGET in x86_64-apple-darwin aarch64-apple-darwin; do
     --enable-ffmpeg --enable-ffprobe --disable-ffplay --enable-videotoolbox \
     --enable-protocol=file,pipe \
     --enable-demuxer=mov,matroska,avi,wav,mp3,flac,ogg \
-    --enable-muxer=mp4,null \
+    --enable-muxer=mp4,null,wav \
     --enable-decoder=h264,hevc,vp8,vp9,av1,mpeg4,aac,mp3,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le \
     --enable-parser=h264,hevc,vp8,vp9,av1,mpeg4video,aac,mpegaudio,opus,vorbis,flac \
     --enable-encoder=h264_videotoolbox,aac,wrapped_avframe,pcm_s16le \
