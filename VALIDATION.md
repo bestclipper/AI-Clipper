@@ -6,7 +6,7 @@ Stand: 8. November 2026. Alle Entwicklungsbefehle in Codex Cloud und GitHub Acti
 
 - TypeScript und Vite-Produktionsbuild: erfolgreich.
 - Frontend-Unit-Tests: 9 erfolgreich.
-- Browser-Integrationstests: 8 erfolgreich (Import, Wiedergabe, Export-UI, Download-UI, Abbruch, Transkriptanzeige, Zeitsprung und Wiederherstellung).
+- Browser-Integrationstests: 9 erfolgreich (Import, Wiedergabe, Export-UI, Download-UI, Abbruch, Transkriptanzeige, Zeitsprung und Wiederherstellung).
 - Rust-Kerntests: SHA-256/Größenprüfung, fehlende/beschädigte Modelle, Zeitstempel, lange Audioabschnittspläne, atomare Speicherung/Wiederherstellung und Beenden eines laufenden Prozesses.
 - Echte FFmpeg-Tests: bisheriger H.264/AAC-Export sowie Mono-16-kHz-PCM-Extraktion aus einer über 300 Sekunden langen Videoquelle; beschädigte Eingaben und Bereinigung geprüft.
 - whisper.cpp v1.8.7 aus festgeschriebenem Quellcode unter Linux erfolgreich gebaut und `whisper-cli --version` gestartet.

@@ -14,6 +14,23 @@ test.beforeEach(async ({ page }) => {
       bytes: 147964211,
       sha256: "verified",
     });
+    w.__manySegments = () => {
+      saved = {
+        schemaVersion: 1,
+        model: "base.en",
+        language: "en",
+        duration: 120,
+        wordsApproximate: true,
+        alignmentStatus: "unreviewed",
+        cpuFallbackUsed: false,
+        segments: Array.from({ length: 101 }, (_, i) => ({
+          start: i,
+          end: i + 0.5,
+          text: `Segment ${i}`,
+          words: [],
+        })),
+      };
+    };
     w.__releaseSpeech = () => release?.();
     w.__speechFailure = () => {
       fail = true;
@@ -169,4 +186,17 @@ test("cancels transcription and reports audio failures", async ({ page }) => {
   );
   await page.getByRole("button", { name: "Transkription starten" }).click();
   await expect(page.getByRole("alert")).toContainText("Audiodatei");
+});
+
+test("reveals all long-transcript segments incrementally", async ({ page }) => {
+  await page.evaluate(() =>
+    (window as unknown as { __manySegments: () => void }).__manySegments(),
+  );
+  await page.getByRole("button", { name: "Ändern", exact: true }).click();
+  await expect(page.locator(".transcript-list article")).toHaveCount(100);
+  await page
+    .getByRole("button", { name: "Weitere Textstellen anzeigen" })
+    .click();
+  await expect(page.locator(".transcript-list article")).toHaveCount(101);
+  await expect(page.getByText("Segment 100", { exact: true })).toBeVisible();
 });

@@ -329,6 +329,14 @@ export default function TranscriptionPanel({
                 ))
               )}
             </div>
+            {segments.length > visible && (
+              <button
+                className="secondary"
+                onClick={() => setVisible((count) => count + 100)}
+              >
+                Weitere Textstellen anzeigen ({visible} / {segments.length})
+              </button>
+            )}
           </div>
         )}
         <p className="export-note">
