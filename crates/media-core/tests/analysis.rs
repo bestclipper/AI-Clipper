@@ -33,7 +33,9 @@ fn real_qwen_semantic_linking_and_rejection() {
     let u = units();
     let mut events = Vec::new();
     for ids in windows(&u) {
-        events.extend(llama.detect(&u, &ids, &[]).unwrap());
+        let report = llama.detect_report(&u, &ids, &[]).unwrap();
+        println!("Synthetic fixture counts only: proposed={}, accepted={}, invalid_ids={}, invalid_quotes={}, invalid_duration={}",report.proposed,report.events.len(),report.invalid_ids,report.invalid_quotes,report.invalid_duration);
+        events.extend(report.events);
     }
     println!(
         "Actual detected events: {}",

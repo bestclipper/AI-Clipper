@@ -28,6 +28,7 @@ export interface Analysis {
   totalWindows: number;
   evaluated: number;
   totalPlans: number;
+  skippedContext?: number;
   candidates: Candidate[];
   cpuFallbackUsed: boolean;
 }

@@ -7,6 +7,7 @@ test.beforeEach(async ({ page }) => {
       cancelled = false;
     let release: (() => void) | undefined;
     let saved: unknown = null;
+    let autoTranscript: unknown = null;
     const model = () => ({
       id: "Qwen3-1.7B-Q4_K_M",
       ready,
@@ -33,7 +34,7 @@ test.beforeEach(async ({ page }) => {
           };
         if (command === "analysis_status")
           return { model: model(), componentReady: true, componentError: null };
-        if (command === "load_transcript") return null;
+        if (command === "load_transcript") return autoTranscript;
         if (command === "load_analysis") return saved;
         if (command === "cancel_operation") {
           cancelled = true;
@@ -42,6 +43,24 @@ test.beforeEach(async ({ page }) => {
         }
         if (command === "download_qwen_model" || command === "analyze_video") {
           cancelled = false;
+          if (command === "analyze_video")
+            autoTranscript = {
+              schemaVersion: 1,
+              model: "base.en",
+              language: "en",
+              duration: 120,
+              wordsApproximate: true,
+              alignmentStatus: "unreviewed",
+              cpuFallbackUsed: false,
+              segments: [
+                {
+                  start: 0.2,
+                  end: 0.7,
+                  text: "Automatically generated source transcript",
+                  words: [],
+                },
+              ],
+            };
           args.onProgress?.onmessage({
             phase: command === "download_qwen_model" ? "downloading" : "events",
             percent: 42,
@@ -146,6 +165,11 @@ test("model download, serial job lock, cancel and retry", async ({ page }) => {
     .click();
   await expect(page.getByRole("alert")).toContainText("abgebrochen");
   await expect(
+    page.getByText("Automatically generated source transcript", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
     page.getByRole("button", { name: "KI-Analyse starten", exact: true }),
   ).toBeEnabled();
 });
@@ -161,6 +185,11 @@ test("restores candidates and plays all source parts skipping the gap", async ({
       window as unknown as { __releaseAnalysis: () => void }
     ).__releaseAnalysis(),
   );
+  await expect(
+    page.getByText("Automatically generated source transcript", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "A linked story" }),
   ).toBeVisible();

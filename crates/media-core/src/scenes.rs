@@ -784,6 +784,27 @@ mod tests {
         assert!(plan_segments(&invalid, &u, 500.).is_err());
     }
     #[test]
+    fn weighting_respects_each_requested_share() {
+        let r = Ratings {
+            entertainment: 10.,
+            surprise: 1.,
+            hook: 1.,
+            clarity: 1.,
+            tension: 1.,
+            ending: 1.,
+        };
+        assert!((r.weighted() - 3.25).abs() < 0.00001);
+        let r = Ratings {
+            entertainment: 1.,
+            surprise: 10.,
+            hook: 1.,
+            clarity: 1.,
+            tension: 1.,
+            ending: 1.,
+        };
+        assert!((r.weighted() - 2.8).abs() < 0.00001);
+    }
+    #[test]
     fn short_sentence_units_can_form_a_single_scene() {
         let u = (0..60)
             .map(|id| Unit {

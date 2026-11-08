@@ -3,7 +3,7 @@ import path from "node:path";
 test("imports, plays, replaces and removes a local video", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "5 Clips erstellen" }),
+    page.getByRole("button", { name: "10 Clips erstellen" }),
   ).toBeDisabled();
   await page
     .locator("input[type=file]")

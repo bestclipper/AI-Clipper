@@ -15,7 +15,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
+const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
@@ -27,6 +28,7 @@ pub struct Analysis {
     pub total_windows: usize,
     pub evaluated: usize,
     pub total_plans: usize,
+    pub skipped_context: usize,
     pub candidates: Vec<Candidate>,
     pub events: Vec<Event>,
     pub audio: Vec<AudioCue>,
@@ -101,15 +103,22 @@ fn string() -> Value {
 fn number() -> Value {
     json!({"type":"number","minimum":1,"maximum":10})
 }
-fn events_schema() -> Value {
+fn events_schema(ids: &[usize]) -> Value {
     object(
-        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","minimum":0},"last":{"type":"integer","minimum":0},"summary":string(),"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":string()}))}}),
+        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","enum":ids},"last":{"type":"integer","enum":ids},"summary":string(),"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":string()}))}}),
     )
 }
 fn judgment_schema() -> Value {
     object(
         json!({"accept":{"type":"boolean"},"title":string(),"category":string(),"reason":string(),"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"contextSafe":{"type":"boolean"},"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
     )
+}
+pub struct DetectionReport {
+    pub events: Vec<Event>,
+    pub proposed: usize,
+    pub invalid_ids: usize,
+    pub invalid_quotes: usize,
+    pub invalid_duration: usize,
 }
 pub struct Llama<'a> {
     pub binary: &'a Path,
@@ -125,7 +134,7 @@ impl Llama<'_> {
         }
         // Bound prompt bytes conservatively; never silently truncate selected dialogue.
         if prompt.len() > 10500 {
-            return Err("Transkriptabschnitt überschreitet das sichere Kontextbudget.".into());
+            return Err(CONTEXT_ERROR.into());
         }
         let tmp = tempfile::tempdir_in(self.root).map_err(|e| e.to_string())?;
         let p = tmp.path().join("prompt.txt");
@@ -200,22 +209,63 @@ impl Llama<'_> {
         ids: &[usize],
         cues: &[AudioCue],
     ) -> Result<Vec<Event>, String> {
+        self.detect_report(units, ids, cues).map(|r| r.events)
+    }
+    pub fn detect_report(
+        &mut self,
+        units: &[Unit],
+        ids: &[usize],
+        cues: &[AudioCue],
+    ) -> Result<DetectionReport, String> {
         let data=ids.iter().map(|id|json!({"id":id,"start":units[*id].start,"end":units[*id].end,"text":units[*id].text,"audio":audio::cue_for(&units[*id],cues)})).collect::<Vec<_>>();
-        let prompt=format!("Identify up to 3 noteworthy coherent events in this transcript window. Consider humor, surprising reversals, strong emotion, a clear promise/claim, question, conflict, reaction or payoff. Include setups even when the payoff may happen later. Do not force a highlight from routine material. Each event must be at most 150 seconds. Keep distinct setup and payoff as separate events, even within one window. First/last must be existing IDs, never seconds. Summaries and specific topic labels help link distant events. People only when explicitly named; never infer speaker changes or laughter from audio loudness. Audio RMS/rise/quiet are supporting intensity cues, not semantic facts. Give interest 1–10, a short exact source quote in evidence, concise English summary/topic/role.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let prompt=format!("Identify up to 3 noteworthy coherent events in this transcript window. Consider humor, surprising reversals, strong emotion, a clear promise/claim, question, conflict, reaction or payoff. Include setups even when the payoff may happen later. Do not force a highlight from routine material. Each event must be at most 150 seconds. Keep distinct setup and payoff as separate events, even within one window. First/last must be existing IDs, never seconds. Summaries and specific topic labels help link distant events. People only when explicitly named; never infer speaker changes or laughter from audio loudness. Audio RMS/rise/quiet are supporting intensity cues, not semantic facts. Give interest 1–10, an exact source quote of at least 8 characters (copy verbatim, no paraphrase or ellipsis) in evidence, concise English summary/topic/role.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Output {
             events: Vec<Event>,
         }
-        let output: Output = serde_json::from_value(self.infer(&prompt, &events_schema())?)
+        let output: Output = serde_json::from_value(self.infer(&prompt, &events_schema(ids))?)
             .map_err(|_| "Ungültige Ereignisantwort der KI.")?;
-        Ok(output
-            .events
-            .into_iter()
-            .filter(|e| scenes::event_valid(e, units, ids))
-            .take(3)
-            .collect())
+        let mut report = DetectionReport {
+            events: vec![],
+            proposed: output.events.len(),
+            invalid_ids: 0,
+            invalid_quotes: 0,
+            invalid_duration: 0,
+        };
+        for e in output.events {
+            let span = Span {
+                first: e.first,
+                last: e.last,
+            };
+            if e.first > e.last
+                || e.last >= units.len()
+                || !(e.first..=e.last).all(|id| ids.contains(&id))
+            {
+                report.invalid_ids += 1;
+                continue;
+            }
+            if e.evidence.trim().len() < 8
+                || !scenes::span_text(units, &span)
+                    .unwrap()
+                    .to_lowercase()
+                    .contains(&e.evidence.trim().to_lowercase())
+            {
+                report.invalid_quotes += 1;
+                continue;
+            }
+            if units[e.last].end - units[e.first].start > 150. {
+                report.invalid_duration += 1;
+                continue;
+            }
+            if scenes::event_valid(&e, units, ids) {
+                report.events.push(e);
+            }
+        }
+        report.events.truncate(3);
+        Ok(report)
     }
+
     pub fn judge(&mut self, plan: &Plan, units: &[Unit]) -> Result<Judgment, String> {
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
         let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
@@ -267,6 +317,7 @@ pub fn analyze(
         total_windows: windows.len(),
         evaluated: 0,
         total_plans: 0,
+        skipped_context: 0,
         candidates: vec![],
         events: vec![],
         audio: vec![],
@@ -323,9 +374,14 @@ pub fn analyze(
             60. + index as f64 / plans.len().max(1) as f64 * 39.,
             format!("Inhaltlicher Vergleich {} von {}", index + 1, plans.len()),
         ));
-        let j = llama.judge(plan, &units)?;
-        if let Ok(c) = scenes::validate_candidate(plan, j, &units, t.duration) {
-            a.candidates.push(c);
+        match llama.judge(plan, &units) {
+            Ok(j) => {
+                if let Ok(c) = scenes::validate_candidate(plan, j, &units, t.duration) {
+                    a.candidates.push(c);
+                }
+            }
+            Err(e) if e == CONTEXT_ERROR => a.skipped_context += 1,
+            Err(e) => return Err(e),
         }
         a.evaluated = index + 1;
         a.cpu_fallback_used = llama.cpu_fallback_used;
@@ -360,6 +416,36 @@ mod tests {
             .contains(&json!("evidence")));
     }
     #[test]
+    fn cache_key_invalidates_when_transcript_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let mut t:Transcript=serde_json::from_value(json!({"schemaVersion":1,"sourceKey":"source","sourcePath":"/test/source.mp4","model":"base.en","language":"en","engine":"whisper.cpp","duration":80.,"wordsApproximate":true,"alignmentStatus":"unreviewed","segments":[],"cpuFallbackUsed":false})).unwrap();
+        let a = Analysis {
+            version: VERSION,
+            key: key(&t).unwrap(),
+            model: models::QWEN.id.into(),
+            complete: false,
+            next_window: 2,
+            total_windows: 3,
+            evaluated: 0,
+            total_plans: 0,
+            skipped_context: 0,
+            candidates: vec![],
+            events: vec![],
+            audio: vec![],
+            audio_complete: true,
+            cpu_fallback_used: false,
+        };
+        save(root.path(), &a).unwrap();
+        assert_eq!(load(root.path(), &t).unwrap().unwrap().next_window, 2);
+        t.segments.push(transcription::Segment {
+            start: 0.,
+            end: 70.,
+            text: "A corrected transcript changes analysis inputs.".into(),
+            words: vec![],
+        });
+        assert!(load(root.path(), &t).unwrap().is_none());
+    }
+    #[test]
     fn checkpoint_is_atomic_and_recoverable() {
         let root = tempfile::tempdir().unwrap();
         let a = Analysis {
@@ -371,6 +457,7 @@ mod tests {
             total_windows: 9,
             evaluated: 0,
             total_plans: 0,
+            skipped_context: 0,
             candidates: vec![],
             events: vec![],
             audio: vec![],
@@ -448,6 +535,21 @@ mod failure_tests {
             .contains("abgebrochen"));
         worker.join().unwrap();
         assert!(start.elapsed() < Duration::from_secs(3));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn incomplete_model_json_does_not_become_a_candidate() {
+        let root = tempfile::tempdir().unwrap();
+        let binary = component(root.path(), "printf '{\"events\":['");
+        let cancel = AtomicBool::new(false);
+        let mut l = Llama {
+            binary: &binary,
+            model: Path::new("unused-test-model"),
+            root: root.path(),
+            cancel: &cancel,
+            cpu_fallback_used: false,
+        };
+        assert!(l.detect(&unit(), &[0], &[]).is_err());
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
     #[test]

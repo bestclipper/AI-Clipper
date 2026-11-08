@@ -1,7 +1,16 @@
-use clipper_media::models::{download_spec, QWEN, WHISPER};
+use clipper_media::models::{download_spec, spec_status, QWEN, WHISPER};
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 fn main() {
     let root = PathBuf::from(std::env::args().nth(1).expect("model root"));
+    let spec = if std::env::args().nth(2).as_deref() == Some("qwen") {
+        QWEN
+    } else {
+        WHISPER
+    };
+    if spec_status(&root, spec).ready {
+        println!("Cached model verified: size and SHA-256 match.");
+        return;
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -271,6 +271,12 @@ export default function AnalysisPanel({
               · {analysis.evaluated} / {analysis.totalPlans} Vergleiche ·{" "}
               {candidates.length} Vorschläge
             </p>
+            {!!analysis.skippedContext && (
+              <p>
+                {analysis.skippedContext} Vorschläge überschritten das
+                Kontextbudget und wurden ausgelassen.
+              </p>
+            )}
             {analysis.cpuFallbackUsed && <p>CPU-Fallback wurde verwendet.</p>}
             {analysis.complete && candidates.length === 0 && (
               <p>

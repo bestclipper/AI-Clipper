@@ -82,9 +82,30 @@ jobs:
         run: |
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends cmake build-essential
-      - run: bash scripts/build-llama.sh
+      - uses: actions/cache/restore@v4
+        id: llama-cache
+        with:
+          path: src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          key: linux-llama-${{ hashFiles('scripts/build-llama.sh') }}
+      - if: steps.llama-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-llama.sh
+      - if: steps.llama-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src-tauri/binaries/llama-completion-x86_64-unknown-linux-gnu
+          key: linux-llama-${{ hashFiles('scripts/build-llama.sh') }}
+      - uses: actions/cache/restore@v4
+        id: qwen-cache
+        with:
+          path: ${{ runner.temp }}/qwen-data/models
+          key: qwen-model-${{ hashFiles('crates/media-core/src/models.rs') }}
       - name: Download and verify pinned Qwen with the actual app downloader
         run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/qwen-data" qwen
+      - if: steps.qwen-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/qwen-data/models
+          key: qwen-model-${{ hashFiles('crates/media-core/src/models.rs') }}
       - uses: actions/download-artifact@v4
         with:
           name: real-english-transcript
@@ -167,6 +188,19 @@ jobs:
           test -s "$app_path/Contents/Resources/third-party/Qwen-Apache-2.0.txt"
           for dmg_path in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             hdiutil verify "$dmg_path"
+            mount_dir="$RUNNER_TEMP/AI Clipper mounted"
+            mkdir -p "$mount_dir"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg_path"
+            test "$(lipo -archs "$mount_dir/AI Clipper.app/Contents/MacOS/llama-completion")" = "arm64"
+            # Intel cannot execute ARM64. Test the DMG bundle layout using host binaries
+            # in a separate copy; never mutate the delivered ARM64 application.
+            package_smoke="$RUNNER_TEMP/AI Clipper package smoke.app"
+            ditto "$mount_dir/AI Clipper.app" "$package_smoke"
+            hdiutil detach "$mount_dir"
+            cp src-tauri/target/debug/ai-clipper "$package_smoke/Contents/MacOS/$executable_name"
+            cp src-tauri/binaries/llama-completion-x86_64-apple-darwin "$package_smoke/Contents/MacOS/llama-completion"
+            codesign --force --deep --sign - "$package_smoke"
+            (cd "$RUNNER_TEMP" && "$package_smoke/Contents/MacOS/$executable_name" --check-llama)
           done
       - uses: actions/upload-artifact@v4
         with:
