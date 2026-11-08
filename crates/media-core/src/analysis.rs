@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-const VERSION: u32 = 7;
+const VERSION: u32 = 8;
 const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,7 +149,7 @@ fn events_schema(ids: &[usize], quotes: &[String]) -> Value {
 }
 fn judgment_schema() -> Value {
     object(
-        json!({"accept":{"type":"boolean"},"title":string(),"category":string(),"reason":string(),"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"contextSafe":{"type":"boolean"},"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
+        json!({"aContextReview":string(),"title":string(),"category":string(),"zVerdict":{"type":"string","enum":["accept","reject"]},"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
     )
 }
 pub struct DetectionReport {
@@ -332,11 +332,11 @@ impl Llama<'_> {
             .map(|p| scenes::span_text(units, p).unwrap_or_default())
             .collect::<Vec<_>>();
         let schema = object(
-            json!({"aTopics":{"type":"array","minItems":parts.len(),"maxItems":parts.len(),"items":{"type":"string"}},"bConcreteLink":{"type":"string"},"cRelation":{"type":"string","enum":["setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"zSameSpecificStory":{"type":"boolean"}}),
+            json!({"aTopics":{"type":"array","minItems":parts.len(),"maxItems":parts.len(),"items":{"type":"string"}},"bConcreteLink":{"type":"string"},"cRelation":{"type":"string","enum":["setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]}}),
         );
-        let prompt=format!("FACTUAL LINK AUDIT. Determine whether these excerpts belong to the same specific story. Do not rate entertainment. First list the actual topic of each excerpt in aTopics. Then explain the concrete connection, or write 'No concrete link', in bConcreteLink. Choose cRelation. Finally set zSameSpecificStory true for a real link and false for unrelated excerpts. A later result of an earlier bet or promise IS a setup_payoff link, even when the promised future punishment has not happened yet. A later answer to the same question or reaction to the same incident also counts. Different activities, mood, analogy, juxtaposition, contrast, competition in general or preparation in general do NOT count. Do not invent a connection.
-Positive example: 'I will win this chess match.' then 'You lost the chess match.' Topics: chess prediction, chess result. Concrete link: the later result resolves the earlier prediction about the SAME match. Relation: setup_payoff. zSameSpecificStory: true.
-Negative example: 'I will win this chess match.' then 'Put rice in boiling water.' Topics: chess prediction, cooking rice. No concrete link. Relation: unrelated. zSameSpecificStory: false.
+        let prompt=format!("FACTUAL LINK AUDIT. Determine whether these excerpts belong to the same specific story. Do not rate entertainment. First list the actual topic of each excerpt in aTopics. Then explain the concrete connection, or write 'No concrete link', in bConcreteLink. Choose cRelation. Choose unrelated if there is no concrete story link. A later result of an earlier bet or promise IS a setup_payoff link, even when the promised future punishment has not happened yet. A later answer to the same question or reaction to the same incident also counts. Different activities, mood, analogy, juxtaposition, contrast, competition in general or preparation in general do NOT count. Do not invent a connection.
+Positive example: 'I will win this chess match.' then 'You lost the chess match.' Topics: chess prediction, chess result. Concrete link: the later result resolves the earlier prediction about the SAME match. Relation: setup_payoff.
+Negative example: 'I will win this chess match.' then 'Put rice in boiling water.' Topics: chess prediction, cooking rice. No concrete link. Relation: unrelated.
 Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}",serde_json::to_string(&parts).unwrap());
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -344,12 +344,10 @@ Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}"
             a_topics: Vec<String>,
             b_concrete_link: String,
             c_relation: String,
-            z_same_specific_story: bool,
         }
         let audit: Audit = serde_json::from_value(self.infer(&prompt, &schema)?)
             .map_err(|_| "Ungültige inhaltliche Faktenprüfung der KI.")?;
-        let linked = audit.z_same_specific_story
-            && audit.c_relation != "unrelated"
+        let linked = audit.c_relation != "unrelated"
             && audit.a_topics.len() == parts.len()
             && audit.b_concrete_link.len() >= 12
             && audit.b_concrete_link.len() <= 800;
@@ -383,7 +381,7 @@ Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}"
             });
         }
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
-        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. Set contextSafe false when uncertain. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and accept false when no relationship. For a single part use relation single. Give short English title/category, grounded English reason explaining concrete source events and connection, exactly one verbatim source quote per selected part in evidence. Never invent dialogue, people or events. Distinguish promises and hypothetical actions from completed actions. Do not describe a future commitment as already fulfilled. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. First review missing referents, omitted qualifiers and future-versus-completed actions in aContextReview. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and zVerdict reject when no relationship. For a single part use relation single. Give a short English title/category and exactly one verbatim source quote per selected part in evidence. Finally set zVerdict accept only when the excerpt is understandable, entertaining, and does not distort the source context; otherwise reject. Never invent dialogue, people or events. Distinguish promises and hypothetical actions from completed actions. Do not describe a future commitment as already fulfilled. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
         let mut schema = judgment_schema();
         let options = plan
             .parts
@@ -396,18 +394,66 @@ Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}"
             );
         }
         schema["properties"]["evidence"] = json!({"type":"array","prefixItems":options.iter().map(|quotes|json!({"type":"string","enum":quotes})).collect::<Vec<_>>(),"minItems":plan.parts.len(),"maxItems":plan.parts.len()});
-        let mut judgment: Judgment = serde_json::from_value(self.infer(&prompt, &schema)?)
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct Evaluation {
+            a_context_review: String,
+            title: String,
+            category: String,
+            relation: String,
+            connection_score: f64,
+            evidence: Vec<String>,
+            ratings: Ratings,
+            z_verdict: String,
+        }
+        let mut value: Evaluation = serde_json::from_value(self.infer(&prompt, &schema)?)
             .map_err(|_| "Ungültige Clip-Bewertung der KI.")?;
-        for (part, quote) in plan.parts.iter().zip(judgment.evidence.iter_mut()) {
+        for (part, quote) in plan.parts.iter().zip(value.evidence.iter_mut()) {
             if let Some(source) = scenes::span_text(units, part) {
                 if let Some(corrected) = scenes::grounded_quote(quote, &source) {
                     *quote = corrected;
                 }
             }
         }
-        if let Some((true, _, reason)) = audited {
-            judgment.reason = reason;
-        }
+        // One explicit final verdict covers context and quality; no contradictory booleans.
+        let accept = value.z_verdict == "accept" && !value.a_context_review.trim().is_empty();
+        let relation = if let Some((true, relation, _)) = audited {
+            relation
+        } else {
+            value.relation
+        };
+        let link = match relation.as_str() {
+            "setup_payoff" => "a setup and its stated outcome",
+            "claim_reaction" => "a claim and a reaction to it",
+            "question_answer" => "a question and its answer",
+            "conflict_resolution" => "a conflict and its resolution",
+            _ => "one continuous scene",
+        };
+        let first = value.evidence.first().map(String::as_str).unwrap_or("");
+        let last = value.evidence.last().map(String::as_str).unwrap_or("");
+        // Display only actual quotes and model assessments, never free invented event narration.
+        let reason = if plan.parts.len() > 1 {
+            format!(
+                "The model links {link}: “{first}” → “{last}”. Connection: {:.0}/10.",
+                value.connection_score
+            )
+        } else {
+            format!(
+                "The model selected {link}: “{first}”. Clarity: {:.0}/10; ending: {:.0}/10.",
+                value.ratings.clarity, value.ratings.ending
+            )
+        };
+        let judgment = Judgment {
+            accept,
+            title: value.title,
+            category: value.category,
+            reason,
+            relation,
+            connection_score: value.connection_score,
+            context_safe: accept,
+            evidence: value.evidence,
+            ratings: value.ratings,
+        };
         Ok(judgment)
     }
 }
