@@ -15,6 +15,33 @@ test.beforeEach(async ({ page }) => {
       sha256: "verified",
     });
     w.__releaseAnalysis = () => release?.();
+    w.__partialAnalysis = () => {
+      const value = saved as {
+        complete: boolean;
+        finished?: boolean;
+        status?: string;
+        selectedIds?: string[];
+        selectionMessage?: string;
+        failures?: unknown[];
+        candidates: { id: string; evaluationMethod?: string }[];
+      };
+      value.complete = false;
+      value.finished = true;
+      value.status = "completed_with_errors";
+      value.selectedIds = [value.candidates[0].id];
+      value.selectionMessage =
+        "1 von 5 geeigneten Szenen gefunden. Ersatzbewertung verwendet.";
+      value.failures = [
+        {
+          id: "plan:2",
+          stage: "comparison",
+          attempts: 2,
+          code: "incomplete_json",
+          recovered: false,
+        },
+      ];
+      value.candidates[0].evaluationMethod = "deterministic";
+    };
     w.__TAURI_INTERNALS__ = {
       convertFileSrc: () => "/tests/fixtures/sample.mp4",
       transformCallback: () => 1,
@@ -212,5 +239,42 @@ test("restores candidates and plays all source parts skipping the gap", async ({
     .toBe(true);
   await expect(
     page.getByRole("button", { name: "Vorschau beenden" }),
+  ).toHaveCount(0);
+});
+
+test("partial model failure is not displayed as fully successful", async ({
+  page,
+}) => {
+  await download(page);
+  await page
+    .getByRole("button", { name: "KI-Analyse starten", exact: true })
+    .click();
+  await page.evaluate(() =>
+    (
+      window as unknown as { __releaseAnalysis: () => void }
+    ).__releaseAnalysis(),
+  );
+  await expect(
+    page.getByRole("heading", { name: "A linked story" }),
+  ).toBeVisible();
+  await page.evaluate(() =>
+    (
+      window as unknown as { __partialAnalysis: () => void }
+    ).__partialAnalysis(),
+  );
+  await page.getByRole("button", { name: "Ändern", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Analyse teilweise fehlgeschlagen · Verarbeitung beendet",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Lokale Ersatzbewertung · nicht von Qwen bestätigt"),
+  ).toBeVisible();
+  await expect(page.getByText("1 / 5 automatisch ausgewählt")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Analyse abgeschlossen · Fünf Szenen ausgewählt",
+    }),
   ).toHaveCount(0);
 });

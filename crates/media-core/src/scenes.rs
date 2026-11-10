@@ -70,6 +70,8 @@ pub struct ClipSegment {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
+    #[serde(default = "qwen_method")]
+    pub evaluation_method: String,
     pub id: String,
     pub title: String,
     pub mode: String,
@@ -83,6 +85,9 @@ pub struct Candidate {
     pub ratings: Ratings,
     pub evidence: Vec<String>,
     pub timestamps_approximate: bool,
+}
+fn qwen_method() -> String {
+    "qwen".into()
 }
 /// Correct formatting only. Every returned character sequence must occur in source.
 /// Small models sometimes quote a JSON `text`/`selected` field including its wrapper.
@@ -362,6 +367,7 @@ pub fn validate_candidate(
     };
     let total = parts.iter().map(|s| s.duration).sum();
     Ok(Candidate {
+        evaluation_method: "qwen".into(),
         id: plan.id.clone(),
         title: j.title,
         mode: if smart { "smart_story" } else { "single_scene" }.into(),

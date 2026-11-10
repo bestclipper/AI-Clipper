@@ -39,3 +39,53 @@ describe("source playlist", () => {
       expect(validPlaylist(parts, 100)).toBe(false);
   });
 });
+
+import { analysisLabel, type Analysis } from "./analysis";
+describe("analysis completion states", () => {
+  const base: Analysis = {
+    complete: false,
+    model: "qwen",
+    nextWindow: 28,
+    totalWindows: 28,
+    evaluated: 1,
+    totalPlans: 20,
+    candidates: [],
+    cpuFallbackUsed: false,
+  };
+  it("never labels interrupted work as completed", () => {
+    expect(analysisLabel(base, false)).toContain("unterbrochen");
+    expect(analysisLabel(base, true)).toBe("Analyse läuft");
+  });
+  it("distinguishes fallback completion, fewer than five, and full success", () => {
+    expect(
+      analysisLabel(
+        { ...base, finished: true, status: "completed_with_errors" },
+        false,
+      ),
+    ).toContain("teilweise fehlgeschlagen");
+    expect(
+      analysisLabel(
+        {
+          ...base,
+          complete: true,
+          finished: true,
+          status: "insufficient_scenes",
+          selectedIds: ["a"],
+        },
+        false,
+      ),
+    ).toContain("Keine fünf");
+    expect(
+      analysisLabel(
+        {
+          ...base,
+          complete: true,
+          finished: true,
+          status: "completed",
+          selectedIds: ["a", "b", "c", "d", "e"],
+        },
+        false,
+      ),
+    ).toContain("Fünf Szenen ausgewählt");
+  });
+});

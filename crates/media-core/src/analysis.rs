@@ -3,6 +3,7 @@ use crate::{
     audio::{self, AudioCue},
     models,
     scenes::{self, *},
+    selection,
     transcription::{self, Transcript},
     Tools,
 };
@@ -10,16 +11,35 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 const VERSION: u32 = 8;
+const REVISION: u32 = 1;
+const MAX_ATTEMPTS: u8 = 2;
 const CONTEXT_ERROR: &str = "Transkriptabschnitt überschreitet das sichere Kontextbudget.";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
+    #[serde(default)]
+    pub revision: u32,
+    #[serde(default)]
+    pub finished: bool,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub selected_ids: Vec<String>,
+    #[serde(default)]
+    pub selection_message: String,
+    #[serde(default)]
+    pub failures: Vec<StepFailure>,
+    #[serde(default)]
+    pub attempts: BTreeMap<String, u8>,
+    #[serde(default)]
+    pub plans: Vec<Plan>,
     pub version: u32,
     pub key: String,
     pub model: String,
@@ -34,6 +54,16 @@ pub struct Analysis {
     pub audio: Vec<AudioCue>,
     pub audio_complete: bool,
     pub cpu_fallback_used: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepFailure {
+    #[serde(default)]
+    pub recovered: bool,
+    pub stage: String,
+    pub id: String,
+    pub attempts: u8,
+    pub code: String,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,12 +89,21 @@ pub fn load(root: &Path, t: &Transcript) -> Result<Option<Analysis>, String> {
     if !p.exists() {
         return Ok(None);
     }
-    let a: Analysis = serde_json::from_reader(fs::File::open(p).map_err(|e| e.to_string())?)
+    let mut a: Analysis = serde_json::from_reader(fs::File::open(p).map_err(|e| e.to_string())?)
         .map_err(|_| {
             "Gespeicherte Analyse beschädigt. Bitte die Analysedatei im App-Datenordner entfernen."
         })?;
     if a.version != VERSION || a.key != k {
         return Ok(None);
+    }
+    if a.revision == 0 {
+        // Keep the old key and prefix plan order: existing 28/28 and 1/20 work is retained.
+        let units = scenes::make_units(t);
+        a.plans = scenes::build_plans(&a.events, &units, t.duration);
+        a.revision = REVISION;
+        a.finished = false;
+        a.complete = false;
+        a.status = "interrupted".into();
     }
     Ok(Some(a))
 }
@@ -98,7 +137,7 @@ fn object(properties: Value) -> Value {
     json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
 }
 fn string() -> Value {
-    json!({"type":"string"})
+    json!({"type":"string","maxLength":96})
 }
 fn number() -> Value {
     json!({"type":"number","minimum":1,"maximum":10})
@@ -108,16 +147,16 @@ fn quote_choices(units: &[Unit], ids: &[usize]) -> Vec<String> {
     let mut choices = Vec::new();
     for id in ids {
         let text = units[*id].text.trim();
-        if (8..=240).contains(&text.len()) {
+        if (8..=120).contains(&text.len()) {
             choices.push(text.to_string());
         }
         for sentence in text.split_inclusive(['.', '?', '!']) {
             let mut rest = sentence.trim();
-            while rest.len() > 240 {
+            while rest.len() > 120 {
                 let end = rest
                     .char_indices()
                     .map(|(i, _)| i)
-                    .take_while(|i| *i <= 240)
+                    .take_while(|i| *i <= 120)
                     .last()
                     .unwrap_or(0);
                 let end = rest[..end]
@@ -144,12 +183,12 @@ fn quote_choices(units: &[Unit], ids: &[usize]) -> Vec<String> {
 }
 fn events_schema(ids: &[usize], quotes: &[String]) -> Value {
     object(
-        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","enum":ids},"last":{"type":"integer","enum":ids},"summary":string(),"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":{"type":"string","enum":quotes}}))}}),
+        json!({"events":{"type":"array","maxItems":3,"items":object(json!({"first":{"type":"integer","enum":ids},"last":{"type":"integer","enum":ids},"summary":{"type":"string","maxLength":160},"topic":string(),"people":{"type":"array","maxItems":5,"items":string()},"role":string(),"interest":number(),"evidence":{"type":"string","enum":quotes}}))}}),
     )
 }
 fn judgment_schema() -> Value {
     object(
-        json!({"aContextReview":string(),"title":string(),"category":string(),"zVerdict":{"type":"string","enum":["accept","reject"]},"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
+        json!({"aContextReview":{"type":"string","maxLength":180,"minLength":1},"title":string(),"category":string(),"zVerdict":{"type":"string","enum":["accept","reject"]},"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
     )
 }
 pub struct DetectionReport {
@@ -165,6 +204,7 @@ pub struct Llama<'a> {
     pub root: &'a Path,
     pub cancel: &'a AtomicBool,
     pub cpu_fallback_used: bool,
+    pub retry: u8,
 }
 impl Llama<'_> {
     fn infer(&mut self, prompt: &str, schema: &Value) -> Result<Value, String> {
@@ -193,9 +233,9 @@ impl Llama<'_> {
                 "--json-schema-file".into(),
                 s.to_string_lossy().into_owned(),
                 "-c".into(),
-                "4096".into(),
+                "6144".into(),
                 "-n".into(),
-                "900".into(),
+                if self.retry == 0 { "768" } else { "1536" }.into(),
                 "-t".into(),
                 "4".into(),
                 "-ngl".into(),
@@ -215,16 +255,20 @@ impl Llama<'_> {
                 "--presence-penalty".into(),
                 "1.5".into(),
                 "--seed".into(),
-                "42".into(),
+                (42 + u32::from(self.retry) * 31).to_string(),
                 "--no-context-shift".into(),
                 "--offline".into(),
+                "--reasoning-budget".into(),
+                "0".into(),
+                "--reasoning-format".into(),
+                "none".into(),
             ];
             crate::run(
                 self.binary,
                 &args,
                 self.cancel,
                 |_| {},
-                Duration::from_secs(900),
+                Duration::from_secs(180),
             )
         };
         let result = match execute(gpu) {
@@ -235,13 +279,9 @@ impl Llama<'_> {
             other => other,
         };
         let bytes=result.map_err(|e|if self.cancel.load(Ordering::SeqCst){"Analyse abgebrochen. Zwischenergebnisse sind gespeichert.".into()}else{format!("Lokale KI fehlgeschlagen. Bei Speichermangel andere Apps schließen und erneut versuchen. {e}")})?;
-        let text = String::from_utf8_lossy(&bytes);
-        let start = text
-            .find('{')
-            .ok_or("KI hat kein gültiges JSON geliefert.")?;
-        let end = text.rfind('}').ok_or("KI-Antwort ist unvollständig.")?;
-        serde_json::from_str(&text[start..=end]).map_err(|_|"KI-Antwort ist unvollständig oder ungültig. Erneut starten setzt am letzten gesicherten Schritt fort.".into())
+        parse_response(&bytes)
     }
+
     pub fn detect(
         &mut self,
         units: &[Unit],
@@ -332,12 +372,9 @@ impl Llama<'_> {
             .map(|p| scenes::span_text(units, p).unwrap_or_default())
             .collect::<Vec<_>>();
         let schema = object(
-            json!({"aTopics":{"type":"array","minItems":parts.len(),"maxItems":parts.len(),"items":{"type":"string"}},"bConcreteLink":{"type":"string"},"cRelation":{"type":"string","enum":["setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]}}),
+            json!({"aTopics":{"type":"array","minItems":parts.len(),"maxItems":parts.len(),"items":{"type":"string","maxLength":80}},"bConcreteLink":{"type":"string","maxLength":180},"cRelation":{"type":"string","enum":["setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]}}),
         );
-        let prompt=format!("FACTUAL LINK AUDIT. Determine whether these excerpts belong to the same specific story. Do not rate entertainment. First list the actual topic of each excerpt in aTopics. Then explain the concrete connection, or write 'No concrete link', in bConcreteLink. Choose cRelation. Choose unrelated if there is no concrete story link. A later result of an earlier bet or promise IS a setup_payoff link, even when the promised future punishment has not happened yet. A later answer to the same question or reaction to the same incident also counts. Different activities, mood, analogy, juxtaposition, contrast, competition in general or preparation in general do NOT count. Do not invent a connection.
-Positive example: 'I will win this chess match.' then 'You lost the chess match.' Topics: chess prediction, chess result. Concrete link: the later result resolves the earlier prediction about the SAME match. Relation: setup_payoff.
-Negative example: 'I will win this chess match.' then 'Put rice in boiling water.' Topics: chess prediction, cooking rice. No concrete link. Relation: unrelated.
-Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}",serde_json::to_string(&parts).unwrap());
+        let prompt=format!("Check whether ALL excerpts concern the SAME specific story. List their topics, briefly state a concrete link or 'No concrete link', then classify cRelation. Different activities, contrast, mood or competition in general are unrelated. A bet/promise followed by its result counts even if a future punishment is not yet fulfilled. Example: 'I will win this chess match' + 'You lost the chess match' = setup_payoff. 'I will win this chess match' + 'Put rice in boiling water' = unrelated. Use only the source facts, no invented bridges. EXCERPTS: {}",serde_json::to_string(&parts).unwrap());
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
         struct Audit {
@@ -381,7 +418,7 @@ Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}"
             });
         }
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
-        let prompt=format!("Judge this proposed English video clip. Parts are chronological original excerpts. Rate entertainment, surprise/emotion, opening hook, clarity without missing context, tension, ending each 1–10. Weighted score is computed by software, not you. Accept only if understandable, entertaining and the ending resolves a point. For multiple parts require an EXPLICIT semantic relationship: setup_payoff, claim_reaction, question_answer or conflict_resolution. Shared mood, generic phrases, proximity or loudness are insufficient. Trace the same actual topic/claim/question through ALL parts. Reject unrelated parts, missing referents, misleading removal of qualifiers or a reaction that actually refers to something else. Consult adjacent NOT SELECTED context; do not quote it as evidence. First review missing referents, omitted qualifiers and future-versus-completed actions in aContextReview. connectionScore assesses the weakest link, never rewards number of parts; use unrelated and zVerdict reject when no relationship. For a single part use relation single. Give a short English title/category and exactly one verbatim source quote per selected part in evidence. Finally set zVerdict accept only when the excerpt is understandable, entertaining, and does not distort the source context; otherwise reject. Never invent dialogue, people or events. Distinguish promises and hypothetical actions from completed actions. Do not describe a future commitment as already fulfilled. Describe only what the selected source actually states. Evidence strings must contain ONLY spoken words, never JSON keys, IDs or wrappers.\nSOURCE DATA: {}",serde_json::to_string(&data).unwrap());
+        let prompt=format!("Rate this English streamer clip for funny, emotional or surprising entertainment, not just fluent speech. Six ratings 1–10: entertainment, surprise/emotion, hook, clarity, tension, ending. Briefly review missing context/qualifiers in aContextReview. Give title/category. connectionScore is the weakest story link, no bonus for more cuts. Choose one source quote per part. zVerdict accept only if entertaining, self-contained and with a meaningful ending; otherwise reject. Do not mistake a future promise for a completed action. Adjacent context is not selected. SOURCE: {}",serde_json::to_string(&data).unwrap());
         let mut schema = judgment_schema();
         let options = plan
             .parts
@@ -457,6 +494,267 @@ Now classify ONLY these actual excerpts, based on their own words. EXCERPTS: {}"
         Ok(judgment)
     }
 }
+/// Parse a complete outer JSON object; never "repair" a truncated inner object into success.
+fn parse_response(bytes: &[u8]) -> Result<Value, String> {
+    if bytes.len() > 24 * 1024 {
+        return Err(
+            "MODEL_OUTPUT_TOO_LONG: KI-Antwort überschreitet das sichere Ausgabelimit.".into(),
+        );
+    }
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| "MODEL_JSON_INVALID: Ungültige Textkodierung.")?;
+    let start = text
+        .find('{')
+        .ok_or("MODEL_JSON_INCOMPLETE: KI-Antwort enthält kein vollständiges JSON.")?;
+    if start > 256 || text[..start].contains("<think>") {
+        return Err("MODEL_REASONING: Unerwartete Thinking-Ausgabe.".into());
+    }
+    let mut stream = serde_json::Deserializer::from_str(&text[start..]).into_iter::<Value>();
+    let value = stream
+        .next()
+        .ok_or("MODEL_JSON_INCOMPLETE: Leere KI-Antwort.")?
+        .map_err(|e| {
+            if e.is_eof() {
+                "MODEL_JSON_INCOMPLETE: KI-Antwort ist unvollständig."
+            } else {
+                "MODEL_JSON_INVALID: KI-Antwort ist kein gültiges JSON."
+            }
+        })?;
+    let tail = text[start + stream.byte_offset()..].trim();
+    if !["", "[end of text]", "<|im_end|>", "<|endoftext|>"].contains(&tail) {
+        return Err("MODEL_JSON_INVALID: Unerwartete Daten nach der JSON-Antwort.".into());
+    }
+    if !value.is_object() {
+        return Err("MODEL_JSON_INVALID: JSON-Objekt erwartet.".into());
+    }
+    Ok(value)
+}
+trait Engine {
+    fn detect(&mut self, u: &[Unit], ids: &[usize], a: &[AudioCue]) -> Result<Vec<Event>, String>;
+    fn judge(&mut self, p: &Plan, u: &[Unit]) -> Result<Judgment, String>;
+    fn retry(&mut self, value: u8);
+    fn cpu_fallback(&self) -> bool;
+}
+impl Engine for Llama<'_> {
+    fn detect(&mut self, u: &[Unit], ids: &[usize], a: &[AudioCue]) -> Result<Vec<Event>, String> {
+        Llama::detect(self, u, ids, a)
+    }
+    fn judge(&mut self, p: &Plan, u: &[Unit]) -> Result<Judgment, String> {
+        Llama::judge(self, p, u)
+    }
+    fn retry(&mut self, value: u8) {
+        self.retry = value;
+    }
+    fn cpu_fallback(&self) -> bool {
+        self.cpu_fallback_used
+    }
+}
+fn error_code(error: &str) -> String {
+    if error == CONTEXT_ERROR {
+        "context_budget"
+    } else if error.contains("TOO_LONG") {
+        "output_too_long"
+    } else if error.contains("INCOMPLETE") || error.contains("unvollständig") {
+        "incomplete_json"
+    } else if error.contains("Zeitlimit") {
+        "timeout"
+    } else {
+        "model_error"
+    }
+    .into()
+}
+fn attempt<T>(
+    root: &Path,
+    a: &mut Analysis,
+    id: &str,
+    stage: &str,
+    cancel: &AtomicBool,
+    engine: &mut impl Engine,
+    mut call: impl FnMut(&mut dyn Engine) -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    while *a.attempts.get(id).unwrap_or(&0) < MAX_ATTEMPTS {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Analyse abgebrochen. Fortschritt gespeichert.".into());
+        }
+        let used = *a.attempts.get(id).unwrap_or(&0);
+        engine.retry(used);
+        a.attempts.insert(id.into(), used + 1);
+        save(root, a)?;
+        match call(engine) {
+            Ok(value) => {
+                if let Some(f) = a.failures.iter_mut().find(|f| f.id == id) {
+                    f.recovered = true;
+                }
+                return Ok(Some(value));
+            }
+            Err(error) => {
+                if cancel.load(Ordering::SeqCst) {
+                    a.attempts.insert(id.into(), used);
+                    save(root, a)?;
+                    return Err("Analyse abgebrochen. Fortschritt gespeichert.".into());
+                }
+                // Persist each failed attempt, including the last one; resume never repeats it forever.
+                a.failures.retain(|f| f.id != id);
+                a.failures.push(StepFailure {
+                    recovered: false,
+                    stage: stage.into(),
+                    id: id.into(),
+                    attempts: used + 1,
+                    code: error_code(&error),
+                });
+                save(root, a)?;
+            }
+        }
+    }
+    if !a.failures.iter().any(|f| f.id == id) {
+        a.failures.push(StepFailure {
+            recovered: false,
+            stage: stage.into(),
+            id: id.into(),
+            attempts: MAX_ATTEMPTS,
+            code: "interrupted_attempts".into(),
+        });
+        save(root, a)?;
+    }
+    Ok(None)
+}
+fn plan_key(p: &Plan) -> String {
+    p.parts
+        .iter()
+        .map(|s| format!("{}:{}", s.first, s.last))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+fn run_steps(
+    root: &Path,
+    a: &mut Analysis,
+    t: &Transcript,
+    units: &[Unit],
+    windows: &[Vec<usize>],
+    cancel: &AtomicBool,
+    engine: &mut impl Engine,
+    notify: &mut impl FnMut(AnalysisProgress),
+) -> Result<(), String> {
+    if a.finished {
+        return Ok(());
+    }
+    a.status = "running".into();
+    a.complete = false;
+    save(root, a)?;
+    let audio = a.audio.clone();
+    for index in a.next_window..windows.len() {
+        notify(AnalysisProgress {
+            phase: "events".into(),
+            percent: 10. + index as f64 / windows.len() as f64 * 50.,
+            message: format!("Transkriptfenster {} von {}", index + 1, windows.len()),
+        });
+        let id = format!("window:{index}");
+        if let Some(events) = attempt(root, a, &id, "window", cancel, engine, |e| {
+            e.detect(units, &windows[index], &audio)
+        })? {
+            a.events.extend(events);
+            retain_events(&mut a.events, units, t.duration);
+        }
+        a.next_window = index + 1;
+        a.cpu_fallback_used = engine.cpu_fallback();
+        save(root, a)?;
+    }
+    if a.plans.is_empty() {
+        a.plans = scenes::build_plans(&a.events, units, t.duration);
+    }
+    let mut known = a
+        .plans
+        .iter()
+        .map(plan_key)
+        .collect::<std::collections::HashSet<_>>();
+    for p in selection::window_plans(units, windows, t.duration) {
+        if known.insert(plan_key(&p)) {
+            a.plans.push(p);
+        }
+    }
+    a.total_plans = a.plans.len();
+    save(root, a)?;
+    for index in a.evaluated..a.plans.len() {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Analyse abgebrochen. Fortschritt gespeichert.".into());
+        }
+        let p = a.plans[index].clone();
+        notify(AnalysisProgress {
+            phase: "ranking".into(),
+            percent: 60. + index as f64 / a.plans.len().max(1) as f64 * 39.,
+            message: format!(
+                "Vergleich {} von {} · maximal 2 Versuche je Schritt",
+                index + 1,
+                a.plans.len()
+            ),
+        });
+        let id = format!("plan:{}", p.id);
+        match attempt(root, a, &id, "comparison", cancel, engine, |e| {
+            e.judge(&p, units)
+        })? {
+            Some(j) => {
+                if let Ok(c) = scenes::validate_candidate(&p, j, units, t.duration) {
+                    if selection::qualifies(&c) {
+                        a.candidates.push(c);
+                    }
+                }
+            }
+            None => {
+                if p.parts.len() == 1 {
+                    if let Some(c) = selection::fallback(&p, units, &a.audio, t.duration) {
+                        a.candidates.push(c);
+                    }
+                } else {
+                    // A failed semantic join is not accepted as a story. Try its continuous source contexts.
+                    let ids = p.parts.iter().map(|s| vec![s.first]).collect::<Vec<_>>();
+                    for single in selection::window_plans(units, &ids, t.duration) {
+                        if a.plans
+                            .iter()
+                            .any(|existing| plan_key(existing) == plan_key(&single))
+                        {
+                            continue;
+                        }
+                        if let Some(c) = selection::fallback(&single, units, &a.audio, t.duration) {
+                            if !a.candidates.iter().any(|x| x.id == c.id) {
+                                a.candidates.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        a.evaluated = index + 1;
+        a.cpu_fallback_used = engine.cpu_fallback();
+        save(root, a)?;
+    }
+    Ok(())
+}
+fn finish(a: &mut Analysis) {
+    a.candidates = scenes::rank_deduplicate(
+        a.candidates
+            .iter()
+            .filter(|c| selection::qualifies(c))
+            .cloned()
+            .collect(),
+    );
+    a.selected_ids = selection::best_five(&a.candidates);
+    a.finished = true;
+    let failed = a.failures.iter().filter(|f| !f.recovered).count() + a.skipped_context;
+    a.complete = failed == 0 && a.skipped_context == 0;
+    a.status = if !a.complete {
+        "completed_with_errors"
+    } else if a.selected_ids.len() < 5 {
+        "insufficient_scenes"
+    } else {
+        "completed"
+    }
+    .into();
+    a.selection_message = if a.selected_ids.len() < 5 {
+        format!("{} von 5 geeigneten, unterschiedlichen Szenen gefunden. Weitere Vorschläge erfüllten Unterhaltung, Einstieg, Abschluss, Dauer oder Überlappungsgrenze nicht. {} KI-Schritte meldeten Fehler; Ersatzbewertungen sind gekennzeichnet.",a.selected_ids.len(),failed)
+    } else {
+        format!("Die 5 besten unterschiedlichen Szenen wurden ausgewählt. {} KI-Schritte meldeten Fehler; Ersatzbewertungen sind gekennzeichnet.",failed)
+    };
+}
 fn retain_events(events: &mut Vec<Event>, units: &[Unit], duration: f64) {
     events.sort_by(|a, b| b.interest.total_cmp(&a.interest));
     let mut kept = Vec::new();
@@ -493,6 +791,14 @@ pub fn analyze(
     }
     let windows = scenes::windows(&units);
     let mut a = load(root, t)?.unwrap_or(Analysis {
+        revision: REVISION,
+        finished: false,
+        status: "interrupted".into(),
+        selected_ids: vec![],
+        selection_message: String::new(),
+        failures: vec![],
+        attempts: BTreeMap::new(),
+        plans: vec![],
         version: VERSION,
         key: key(t)?,
         model: models::QWEN.id.into(),
@@ -508,7 +814,7 @@ pub fn analyze(
         audio_complete: false,
         cpu_fallback_used: false,
     });
-    if a.complete {
+    if a.finished {
         return Ok(a);
     }
     if a.next_window > windows.len() {
@@ -536,55 +842,27 @@ pub fn analyze(
         root,
         cancel,
         cpu_fallback_used: a.cpu_fallback_used,
+        retry: 0,
     };
-    for (index, ids) in windows.iter().enumerate().skip(a.next_window) {
-        notify(progress(
-            "events",
-            10. + index as f64 / windows.len() as f64 * 50.,
-            format!("Transkriptfenster {} von {}", index + 1, windows.len()),
-        ));
-        let found = llama.detect(&units, ids, &a.audio)?;
-        a.events.extend(found);
-        retain_events(&mut a.events, &units, t.duration);
-        a.next_window = index + 1;
-        a.cpu_fallback_used = llama.cpu_fallback_used;
-        save(root, &a)?;
-    }
-    let plans = scenes::build_plans(&a.events, &units, t.duration);
-    a.total_plans = plans.len();
-    for (index, plan) in plans.iter().enumerate().skip(a.evaluated) {
-        notify(progress(
-            "ranking",
-            60. + index as f64 / plans.len().max(1) as f64 * 39.,
-            format!("Inhaltlicher Vergleich {} von {}", index + 1, plans.len()),
-        ));
-        match llama.judge(plan, &units) {
-            Ok(j) => {
-                if let Ok(c) = scenes::validate_candidate(plan, j, &units, t.duration) {
-                    a.candidates.push(c);
-                }
-            }
-            Err(e) if e == CONTEXT_ERROR => a.skipped_context += 1,
-            Err(e) => return Err(e),
-        }
-        a.evaluated = index + 1;
-        a.cpu_fallback_used = llama.cpu_fallback_used;
-        save(root, &a)?;
-    }
+    run_steps(
+        root,
+        &mut a,
+        t,
+        &units,
+        &windows,
+        cancel,
+        &mut llama,
+        &mut notify,
+    )?;
     if cancel.load(Ordering::SeqCst) {
         return Err("Analyse abgebrochen.".into());
     }
     if transcription::source_key(source)? != t.source_key {
         return Err("Die Videodatei wurde während der Analyse verändert.".into());
     }
-    a.candidates = scenes::rank_deduplicate(a.candidates);
-    a.complete = true;
+    finish(&mut a);
     save(root, &a)?;
-    notify(progress(
-        "complete",
-        100.,
-        format!("{} belegte Vorschläge gefunden.", a.candidates.len()),
-    ));
+    notify(progress(&a.status, 100., a.selection_message.clone()));
     Ok(a)
 }
 #[cfg(test)]
@@ -627,6 +905,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut t:Transcript=serde_json::from_value(json!({"schemaVersion":1,"sourceKey":"source","sourcePath":"/test/source.mp4","model":"base.en","language":"en","engine":"whisper.cpp","duration":80.,"wordsApproximate":true,"alignmentStatus":"unreviewed","segments":[],"cpuFallbackUsed":false})).unwrap();
         let a = Analysis {
+            revision: REVISION,
+            finished: false,
+            status: "interrupted".into(),
+            selected_ids: vec![],
+            selection_message: String::new(),
+            failures: vec![],
+            attempts: BTreeMap::new(),
+            plans: vec![],
             version: VERSION,
             key: key(&t).unwrap(),
             model: models::QWEN.id.into(),
@@ -656,6 +942,14 @@ mod tests {
     fn checkpoint_is_atomic_and_recoverable() {
         let root = tempfile::tempdir().unwrap();
         let a = Analysis {
+            revision: REVISION,
+            finished: false,
+            status: "interrupted".into(),
+            selected_ids: vec![],
+            selection_message: String::new(),
+            failures: vec![],
+            attempts: BTreeMap::new(),
+            plans: vec![],
             version: VERSION,
             key: "test".into(),
             model: models::QWEN.id.into(),
@@ -712,6 +1006,7 @@ mod failure_tests {
             root: root.path(),
             cancel: &flag,
             cpu_fallback_used: false,
+            retry: 0,
         };
         let error = l.detect(&unit(), &[0], &[]).unwrap_err();
         assert!(error.contains("Speichermangel"));
@@ -734,6 +1029,7 @@ mod failure_tests {
             root: root.path(),
             cancel: &flag,
             cpu_fallback_used: false,
+            retry: 0,
         };
         let start = std::time::Instant::now();
         assert!(l
@@ -755,6 +1051,7 @@ mod failure_tests {
             root: root.path(),
             cancel: &cancel,
             cpu_fallback_used: false,
+            retry: 0,
         };
         assert!(l.detect(&unit(), &[0], &[]).is_err());
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
@@ -772,5 +1069,368 @@ mod failure_tests {
         .unwrap_err()
         .contains("Modell fehlt"));
         assert!(!models::spec_status(root.path(), models::QWEN).ready);
+    }
+}
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    fn transcript() -> Transcript {
+        let segments=(0..6).flat_map(|scene|(0..3).map(move|part|transcription::Segment{start:scene as f64*150.+part as f64*25.,end:scene as f64*150.+(part+1)as f64*25.,text:match part{0=>"Watch this ridiculous challenge, I bet I will win. I promise this will be funny!",1=>"No way, I cannot believe that unexpected joke! We laugh at the hilarious surprise.",_=>"Finally I lost the bet, that is the punchline. Because we laugh, I will never try that again!"}.into(),words:vec![]})).collect();
+        Transcript {
+            schema_version: 1,
+            source_key: "fixture".into(),
+            source_path: "/fixture.mp4".into(),
+            model: "base.en".into(),
+            language: "en".into(),
+            engine: "whisper.cpp".into(),
+            duration: 900.,
+            words_approximate: true,
+            alignment_status: "unreviewed".into(),
+            segments,
+            cpu_fallback_used: false,
+        }
+    }
+    fn state(t: &Transcript) -> Analysis {
+        serde_json::from_value(json!({"version":VERSION,"key":key(t).unwrap(),"model":models::QWEN.id,"complete":false,"nextWindow":0,"totalWindows":6,"evaluated":0,"totalPlans":0,"skippedContext":0,"candidates":[],"events":[],"audio":[],"audioComplete":true,"cpuFallbackUsed":false,"revision":REVISION})).unwrap()
+    }
+    #[derive(Default)]
+    struct FakeEngine {
+        calls: BTreeMap<String, usize>,
+        fail: bool,
+        once: bool,
+        cancel: Option<std::sync::Arc<AtomicBool>>,
+    }
+    impl Engine for FakeEngine {
+        fn detect(
+            &mut self,
+            _: &[Unit],
+            _: &[usize],
+            _: &[AudioCue],
+        ) -> Result<Vec<Event>, String> {
+            *self.calls.entry("window".into()).or_default() += 1;
+            if self.fail {
+                Err("MODEL_JSON_INCOMPLETE".into())
+            } else {
+                Ok(vec![])
+            }
+        }
+        fn judge(&mut self, p: &Plan, u: &[Unit]) -> Result<Judgment, String> {
+            let count = self.calls.entry(p.id.clone()).or_default();
+            *count += 1;
+            if let Some(flag) = &self.cancel {
+                flag.store(true, Ordering::SeqCst);
+                return Err("cancelled".into());
+            }
+            if self.fail || (self.once && *count == 1) {
+                return Err("MODEL_JSON_INCOMPLETE: KI-Antwort ist unvollständig.".into());
+            }
+            Ok(Judgment {
+                accept: true,
+                title: "An unexpected challenge".into(),
+                category: "Humorous reaction".into(),
+                reason: "A promise is followed by its actual unexpected outcome.".into(),
+                relation: "single".into(),
+                connection_score: 8.,
+                context_safe: true,
+                evidence: p.parts.iter().map(|s| u[s.first].text.clone()).collect(),
+                ratings: Ratings {
+                    entertainment: 8.,
+                    surprise: 8.,
+                    hook: 8.,
+                    clarity: 8.,
+                    tension: 8.,
+                    ending: 8.,
+                },
+            })
+        }
+        fn retry(&mut self, _: u8) {}
+        fn cpu_fallback(&self) -> bool {
+            false
+        }
+    }
+    #[test]
+    fn parses_truncation_invalid_utf8_trailing_and_oversize_without_panics() {
+        for bytes in [
+            b"{\"ratings\":{\"ending\":8}".as_slice(),
+            b"{\"events\":[",
+            b"no json",
+            b"{\"a\":1}{\"b\":2}",
+            b"\xff{\"a\":1}",
+        ] {
+            assert!(parse_response(bytes).is_err());
+        }
+        assert!(parse_response(&vec![b'a'; 24 * 1024 + 1])
+            .unwrap_err()
+            .contains("TOO_LONG"));
+        assert_eq!(
+            parse_response(b"\n{\"a\":1}\n[end of text]").unwrap()["a"],
+            1
+        );
+    }
+    #[test]
+    fn repeated_truncated_comparisons_finish_save_and_select_five() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let windows = (0..6).map(|i| vec![i * 3]).collect::<Vec<_>>();
+        let mut a = state(&t);
+        a.next_window = windows.len();
+        let mut engine = FakeEngine {
+            fail: true,
+            ..Default::default()
+        };
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &windows,
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut a);
+        save(root.path(), &a).unwrap();
+        assert!(a.finished);
+        assert!(!a.complete);
+        assert_eq!(a.status, "completed_with_errors");
+        assert_eq!(a.selected_ids.len(), 5);
+        assert_eq!(a.evaluated, a.total_plans);
+        assert!(engine.calls.values().all(|n| *n <= 2));
+        assert!(a
+            .candidates
+            .iter()
+            .all(|c| c.evaluation_method == "deterministic"
+                && (61. ..=90.).contains(&c.total_duration)));
+        let restored = load(root.path(), &t).unwrap().unwrap();
+        assert!(restored.finished);
+        assert_eq!(restored.selected_ids, a.selected_ids);
+        let calls = engine.calls.clone();
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &windows,
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(calls, engine.calls, "completed steps must not run again");
+    }
+    #[test]
+    fn five_real_eligible_scenes_are_selected_without_strong_overlap() {
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let windows = (0..6).map(|i| vec![i * 3]).collect::<Vec<_>>();
+        let candidates = selection::window_plans(&u, &windows, t.duration)
+            .iter()
+            .filter_map(|p| selection::fallback(p, &u, &[], t.duration))
+            .collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 6);
+        let ids = selection::best_five(&candidates);
+        assert_eq!(ids.len(), 5);
+        let chosen = candidates
+            .iter()
+            .filter(|c| ids.contains(&c.id))
+            .collect::<Vec<_>>();
+        for (i, a) in chosen.iter().enumerate() {
+            for b in &chosen[i + 1..] {
+                assert!(!selection::strongly_overlap(a, b));
+            }
+        }
+    }
+    #[test]
+    fn resume_28_of_28_one_of_20_preserves_existing_and_never_loops() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let windows = (0..28).map(|i| vec![(i % 6) * 3]).collect::<Vec<_>>();
+        let mut a = state(&t);
+        a.next_window = 28;
+        a.total_windows = 28;
+        a.evaluated = 1;
+        a.plans = (0..20)
+            .map(|i| Plan {
+                id: format!("old_{i}"),
+                parts: vec![Span {
+                    first: (i % 6) * 3,
+                    last: (i % 6) * 3 + 2,
+                }],
+                event_ids: vec![],
+            })
+            .collect();
+        a.total_plans = 20;
+        let mut engine = FakeEngine::default();
+        let original = scenes::validate_candidate(
+            &a.plans[0],
+            engine.judge(&a.plans[0], &u).unwrap(),
+            &u,
+            t.duration,
+        )
+        .unwrap();
+        a.candidates.push(original.clone());
+        save(root.path(), &a).unwrap();
+        let mut restored = load(root.path(), &t).unwrap().unwrap();
+        engine.fail = true;
+        engine.calls.clear();
+        run_steps(
+            root.path(),
+            &mut restored,
+            &t,
+            &u,
+            &windows,
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut restored);
+        assert!(!engine.calls.contains_key("window"));
+        assert!(!engine.calls.contains_key("old_0"));
+        assert_eq!(engine.calls["old_1"], 2);
+        assert_eq!(restored.evaluated, restored.total_plans);
+        assert!(restored.candidates.iter().any(|c| c.id == original.id));
+        assert_eq!(restored.selected_ids.len(), 5);
+    }
+    #[test]
+    fn transient_retry_and_cancellation_do_not_claim_partial_success() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let windows = vec![vec![0]];
+        let mut a = state(&t);
+        a.next_window = 1;
+        let flag = std::sync::Arc::new(AtomicBool::new(false));
+        let mut engine = FakeEngine {
+            cancel: Some(flag.clone()),
+            ..Default::default()
+        };
+        assert!(run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &windows,
+            &flag,
+            &mut engine,
+            &mut |_| {}
+        )
+        .is_err());
+        assert!(!a.finished);
+        assert_eq!(a.evaluated, 0);
+        assert_eq!(a.attempts.values().sum::<u8>(), 0);
+        flag.store(false, Ordering::SeqCst);
+        engine.cancel = None;
+        engine.once = true;
+        engine.calls.clear();
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &windows,
+            &flag,
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut a);
+        assert!(a.complete);
+        assert!(a.failures.iter().all(|f| f.recovered));
+        assert_eq!(a.status, "insufficient_scenes");
+    }
+    #[test]
+    fn legacy_checkpoint_migrates_without_discarding_transcript_windows() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let mut a = state(&t);
+        a.next_window = 6;
+        a.evaluated = 0;
+        a.revision = 0;
+        save(root.path(), &a).unwrap();
+        let loaded = load(root.path(), &t).unwrap().unwrap();
+        assert_eq!(loaded.next_window, 6);
+        assert_eq!(loaded.revision, REVISION);
+        assert!(!loaded.finished);
+        assert!(!loaded.complete);
+    }
+    #[test]
+    fn failed_windows_do_not_block_candidates_from_the_whole_transcript() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let windows = (0..6).map(|i| vec![i * 3]).collect::<Vec<_>>();
+        let mut a = state(&t);
+        let mut engine = FakeEngine {
+            fail: true,
+            ..Default::default()
+        };
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &windows,
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut a);
+        assert_eq!(a.next_window, 6);
+        assert_eq!(a.attempts["window:5"], 2);
+        assert_eq!(a.selected_ids.len(), 5);
+        assert_eq!(a.status, "completed_with_errors");
+    }
+    #[test]
+    fn failed_story_never_invents_an_unverified_semantic_join() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let mut a = state(&t);
+        a.plans = vec![Plan {
+            id: "story".into(),
+            parts: vec![Span { first: 0, last: 1 }, Span { first: 3, last: 3 }],
+            event_ids: vec![],
+        }];
+        assert!(scenes::plan_segments(&a.plans[0], &u, t.duration).is_ok());
+        let mut engine = FakeEngine {
+            fail: true,
+            ..Default::default()
+        };
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &[],
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut a);
+        assert!(!a.candidates.is_empty());
+        assert!(a
+            .candidates
+            .iter()
+            .all(|c| c.mode == "single_scene" && c.evaluation_method == "deterministic"));
+    }
+    #[test]
+    fn routine_speech_does_not_force_five_fallbacks() {
+        let mut t = transcript();
+        for s in &mut t.segments {
+            s.text =
+                "The meeting starts at nine. We will read the agenda and discuss the schedule."
+                    .into();
+        }
+        let u = scenes::make_units(&t);
+        let plans = selection::window_plans(&u, &[vec![0], vec![3]], t.duration);
+        assert!(plans
+            .iter()
+            .all(|p| selection::fallback(p, &u, &[], t.duration).is_none()));
     }
 }

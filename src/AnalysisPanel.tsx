@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { Sparkles, Download, Play } from "lucide-react";
+import { analysisLabel } from "./analysis";
 import { timestamp, type ModelStatus } from "./transcription";
 import type {
   Analysis,
@@ -126,9 +127,14 @@ export default function AnalysisPanel({
     ranking: "Szenen bewerten",
     complete: "Abgeschlossen",
   };
+  const selected = new Set(analysis?.selectedIds ?? []);
   const candidates = [...(analysis?.candidates ?? [])].sort(
-    (a, b) => b.score - a.score,
+    (a, b) =>
+      Number(selected.has(b.id)) - Number(selected.has(a.id)) ||
+      b.score - a.score,
   );
+  const failed = analysis?.failures?.filter((f) => !f.recovered) ?? [];
+  const recovered = analysis?.failures?.filter((f) => f.recovered) ?? [];
   return (
     <section
       id="analysis"
@@ -209,7 +215,7 @@ export default function AnalysisPanel({
             onClick={() => execute(false)}
           >
             <Sparkles size={16} />
-            {analysis && !analysis.complete
+            {analysis && !(analysis.finished ?? analysis.complete)
               ? "KI-Analyse fortsetzen"
               : "KI-Analyse starten"}
           </button>
@@ -261,11 +267,57 @@ export default function AnalysisPanel({
         )}
         {analysis && (
           <div className="scene-results">
-            <h3>
-              {analysis.complete
-                ? "Analyse lokal gespeichert"
-                : "Zwischenergebnis gespeichert · Fortsetzen möglich"}
-            </h3>
+            <h3 aria-live="polite">{analysisLabel(analysis, active)}</h3>
+            {analysis.selectionMessage && <p>{analysis.selectionMessage}</p>}
+            {(analysis.finished ?? analysis.complete) && (
+              <p>
+                <strong>{selected.size} / 5 automatisch ausgewählt</strong> ·
+                höchstens 20 % zeitliche Überlappung
+              </p>
+            )}
+            {failed.length > 0 && (
+              <p className="range-warning">
+                {failed.length} KI-Schritte sind dauerhaft fehlgeschlagen. Die
+                Verarbeitung der übrigen Schritte ist erhalten; lokale
+                Ersatzbewertungen sind markiert.
+              </p>
+            )}
+            {recovered.length > 0 && (
+              <p>
+                {recovered.length} Schritte wurden nach Wiederholung erfolgreich
+                verarbeitet.
+              </p>
+            )}
+            {!!analysis.failures?.length && (
+              <details>
+                <summary>Hinweise zu KI-Schritten</summary>
+                <ul>
+                  {analysis.failures.map((f) => (
+                    <li key={f.id}>
+                      {f.stage === "comparison"
+                        ? "Vergleich"
+                        : "Transkriptfenster"}{" "}
+                      · {f.attempts} Versuche ·{" "}
+                      {f.recovered
+                        ? "wiederhergestellt"
+                        : "Ersatzbewertung / lokaler Kandidatenscan"}{" "}
+                      ·{" "}
+                      {(
+                        {
+                          incomplete_json: "Antwort unvollständig",
+                          output_too_long: "Antwort zu lang",
+                          timeout: "Zeitlimit",
+                          context_budget: "Kontextbudget überschritten",
+                          model_error: "Modell- oder Formatfehler",
+                          interrupted_attempts:
+                            "Vorherige Versuche unterbrochen",
+                        } as Record<string, string>
+                      )[f.code] ?? "KI-Fehler"}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             <p>
               {analysis.nextWindow} / {analysis.totalWindows} Transkriptfenster
               · {analysis.evaluated} / {analysis.totalPlans} Vergleiche ·{" "}
@@ -278,15 +330,26 @@ export default function AnalysisPanel({
               </p>
             )}
             {analysis.cpuFallbackUsed && <p>CPU-Fallback wurde verwendet.</p>}
-            {analysis.complete && candidates.length === 0 && (
-              <p>
-                Keine ausreichend belegte, verständliche Szene mit 61–90
-                Sekunden gefunden. Es werden keine künstlichen
-                Zusammenstellungen erzwungen.
-              </p>
-            )}
+            {(analysis.finished ?? analysis.complete) &&
+              candidates.length === 0 && (
+                <p>
+                  Keine ausreichend belegte, verständliche Szene mit 61–90
+                  Sekunden gefunden. Es werden keine künstlichen
+                  Zusammenstellungen erzwungen.
+                </p>
+              )}
             {candidates.slice(0, visible).map((clip) => (
               <article className="scene-card" key={clip.id}>
+                {selected.has(clip.id) && (
+                  <span className="model-ready">
+                    Automatisch ausgewählt · Top 5
+                  </span>
+                )}
+                {clip.evaluationMethod === "deterministic" && (
+                  <p className="range-warning">
+                    Lokale Ersatzbewertung · nicht von Qwen bestätigt
+                  </p>
+                )}
                 <div className="scene-card-heading">
                   <div>
                     <span
@@ -369,8 +432,7 @@ export default function AnalysisPanel({
           aus Whisper sind ungefähr; Vorschläge bitte ansehen. Audiointensität
           ist kein verlässlicher Lach- oder Sprecherwechseldetektor. Smart
           Stories werden hier nur als Playlist im Originalvideo abgespielt.
-          Mehrteiliger MP4-Export, automatische Endauswahl und Untertitel folgen
-          in späteren Phasen.
+          Mehrteiliger MP4-Export und Untertitel folgen in späteren Phasen.
         </p>
       </div>
     </section>

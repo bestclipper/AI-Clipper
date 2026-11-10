@@ -1,7 +1,7 @@
 import type { Candidate } from "./analysis";
 /** Multipart contract shared with Phase 4; automatic rendering follows later. */
 export const OUTPUT_PROFILE = Object.freeze({
-  count: 10,
+  count: 5,
   minSeconds: 61,
   maxSeconds: 90,
   width: 1080,

@@ -1,6 +1,48 @@
-# AI Clipper · Phase 4
+# AI Clipper · Phase 4 · v0.4.1
 
 Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe, whisper.cpp und llama.cpp**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
+
+## Fehlerbehebung: Analyse fortsetzen und fünf Szenen auswählen
+
+Installiere **v0.4.1** wie unten beschrieben. Modelle, Transkript und bisherige
+Analyse bleiben im bestehenden App-Datenordner. Importiere dieselbe unveränderte
+Videodatei und klicke **KI-Analyse fortsetzen**. Bereits bearbeitete Fenster und
+Vergleiche werden übernommen; kein Terminal und kein erneuter Modelldownload nötig.
+
+- JSON-Ausgaben sind durch kurze Felder und Originalzitate begrenzt. Qwen-Thinking
+  ist per leerem Thinking-Präfix, `/no_think` und CLI-Budget 0 deaktiviert.
+- Pro Schritt höchstens zwei persistierte Versuche: zunächst 768, danach 1536
+  Ausgabetokens mit geändertem Seed; 6144 Kontexttokens, vier Threads, Batches
+  128/64 und ein Timeout von 180 Sekunden pro Prozess. Metal hat bei einem
+  Prozessfehler weiterhin einen einmaligen CPU-Fallback. Ein Parsefehler allein
+  löst keinen zusätzlichen GPU-/CPU-Doppellauf aus.
+- Ein abgeschnittenes, ungültiges oder übergroßes JSON wird nicht als Ergebnis
+  übernommen. Nach dauerhaftem Fehler folgen eine gekennzeichnete lokale
+  Ersatzbewertung und der nächste Schritt. Versuche und Fortschritt werden atomar
+  gespeichert; ein Abbruch verbraucht keinen Fehlversuch. Es gibt keinen endlosen
+  Neustart am selben Vergleich.
+- Die lokale Ersatzbewertung nutzt belegbare Textsignale für Humor, Überraschung,
+  Emotion, Einstieg und Abschluss sowie Audiointensität als Zusatzsignal. Sie
+  bestätigt keine frei erfundenen Story-Verknüpfungen und ist **keine semantische
+  Qwen-Bestätigung**. Ungeprüfte Smart Stories werden nicht zusammengesetzt;
+  allenfalls geeignete zusammenhängende Originalabschnitte bleiben übrig.
+- Nach der Verarbeitung wählt die App automatisch bis zu **fünf** hochwertige,
+  unterschiedliche Szenen aus. Unterhaltungswert/Überraschung, Hook, Klarheit und
+  Abschluss müssen Mindestwerte erfüllen. Zwischen ausgewählten Clips dürfen
+  höchstens 20 % der kürzeren Szene zeitlich überlappen. 65–80 Sekunden werden bei
+  vergleichbarer Bewertung bevorzugt; alle Grenzen bleiben 61–90 Sekunden.
+- **Analyse läuft**, **Analyse unterbrochen**, **Analyse abgeschlossen** und
+  **Analyse teilweise fehlgeschlagen · Verarbeitung beendet** sind getrennte
+  Zustände. Bei weniger als fünf Treffern werden Anzahl und Einschränkungen
+  angezeigt. Abgearbeitete Schritte mit Ersatzbewertungen werden nicht als
+  vollständig erfolgreiche KI-Analyse bezeichnet oder automatisch erneut versucht.
+
+Die Auswahl bezieht sämtliche Transkriptfenster ein; nicht nur die bisherigen
+20 Ereignisvergleiche. Die deterministische Vorauswahl und die begrenzte Suche
+können trotzdem Highlights übersehen. Fünf Ergebnisse werden nicht durch
+beliebige Füllclips erzwungen. Scores bleiben Einschätzungen. Der tatsächliche
+M1-Spitzenverbrauch muss auf dem Gerät geprüft werden; die zusätzlichen
+Kontexttokens sind begrenzt und Modelle laufen weiterhin nacheinander.
 
 ## Phase 4 · lokale Szenenanalyse
 
@@ -16,7 +58,7 @@ kein API-Schlüssel und kein Video-Upload. Nach dem Modelldownload offline nutzb
   überlappenden Fenstern erkennen, dann globale Themen und konkrete Aussagen
   vergleichen. Eine unabhängige Faktenprüfung muss zuerst einen konkreten Zusammenhang erkennen. Die anschließende Bewertung muss Zusammenhang und Verständlichkeit
   anhand der Originalaussagen begründen. Unbelegte oder unpassende Vorschläge
-  werden verworfen; zehn Treffer werden nicht erzwungen.
+  werden verworfen; fünf Treffer werden nicht erzwungen.
 - Die Liste ist nach Score sortiert. Details enthalten Originalzeiten,
   englischen Titel, Kategorie, Begründung, Belegzitate und Einzelbewertungen.
   **Smart Story als Playlist ansehen** spielt die Teile im Originalvideo ab
@@ -36,7 +78,7 @@ Originalmodell: <https://huggingface.co/Qwen/Qwen3-1.7B>.
 Quantisierung: <https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/tree/daeb8e2d528a760970442092f6bf1e55c3b659eb>.
 
 Ein gemeinsamer Backend-Lock verhindert parallele Whisper-, Qwen- und
-Exportprozesse. Kontext 4096 Tokens, vier Threads, kleine Batches, mmap,
+Exportprozesse. Kontext 6144 Tokens, vier Threads, kleine Batches, mmap,
 keine vollständigen Video- oder Audiokopien im RAM. Audio wird abschnittsweise
 (maximal fünf Minuten) als mono 16-kHz-PCM analysiert. RMS, Spitzen, Änderungen
 und Stille sind Zusatzsignale; kein verlässlicher Lach-/Sprecherwechseldetektor.
@@ -44,7 +86,7 @@ Jede Inferenz beendet ihren Prozess und gibt Modellressourcen frei; bei
 Metal-Problemen einmaliger CPU-Fallback. Auf dem M1 kann dies lange dauern.
 
 Alle Transkriptfenster werden verarbeitet. Für begrenzten Aufwand bleiben maximal
-256 zeitlich verteilte Ereignisse, 32 Anker und 96 Bewertungskandidaten erhalten.
+256 zeitlich verteilte Ereignisse, 32 Anker, 96 Ereigniskombinationen und bis zu 160 zusätzliche Einzelkandidaten aus allen Transkriptfenstern erhalten.
 Alle gültigen, deduplizierten Bewertungskandidaten sind in der Liste einblendbar.
 Globale Nachbarn werden mit semantischen Modellbeschreibungen vorgefiltert;
 dadurch können Beziehungen übersehen werden. Dies ist keine Garantie, jeden
@@ -60,7 +102,7 @@ Keine erfundenen Sekunden und keine verdeckte Verlängerung zu kurzer Szenen.
 Daten liegen in `~/Library/Application Support/com.aiclipper.desktop/`
 (`models`, `projects`, `analyses`). Kein Upload, keine Telemetrie.
 
-Phase 5 folgt später: mehrteiliger MP4-Export, automatische Endauswahl und
+Phase 5 folgt später: mehrteiliger MP4-Export und
 Stapelverarbeitung sowie Untertitel im exportierten Video. Der bisherige
 manuelle 9:16-Testexport und die Transkription bleiben verfügbar.
 
@@ -95,7 +137,7 @@ Transkripte werden atomar erst nach vollständigem Erfolg gespeichert. Bei Fehle
 
 ### Was folgt später?
 
-Phase 4 ergänzt lokale Szenenerkennung und Ranking (siehe oben). Automatische Endauswahl und Fertigstellung von zehn Clips folgen später. Der manuelle Testclip-Export aus Phase 2 bleibt vollständig nutzbar.
+Phase 4 ergänzt lokale Szenenerkennung und Ranking (siehe oben). Fertigstellung und Stapel-Export der fünf ausgewählten Clips folgen später. Der manuelle Testclip-Export aus Phase 2 bleibt vollständig nutzbar.
 
 ## Was funktioniert außerdem?
 
@@ -105,7 +147,7 @@ Phase 4 ergänzt lokale Szenenerkennung und Ranking (siehe oben). Automatische E
 - MP4 mit **H.264 und AAC**, Originalton bleibt erhalten; eine stumme Quelle bleibt stumm.
 - Fortschrittsanzeige, Abbruch und automatische Prüfung vor der Erfolgsmeldung.
 
-**Später:** automatische Endauswahl von zehn Szenenkonzepten, intelligentes Reframing, englische Untertitel, Stapel-Export und Link-Import. Der Button „10 Clips erstellen“ bleibt deaktiviert.
+**Später:** intelligentes Reframing, englische Untertitel, Stapel-Export und Link-Import. Der Button „5 Clips erstellen“ bleibt deaktiviert.
 
 ## Installieren – ohne Terminal
 

@@ -186,7 +186,7 @@ export default function App() {
           </p>
         </div>
         <div className="device">
-          <span className="dot" /> Apple Silicon <small>Phase 4 · v0.4.0</small>
+          <span className="dot" /> Apple Silicon <small>Phase 4 · v0.4.1</small>
         </div>
       </aside>
       <main>
@@ -386,12 +386,12 @@ export default function App() {
               <div className="info">
                 <Sparkles size={18} />
                 <p>
-                  Das Zielprofil für die spätere KI-Auswahl. Einzelne Abschnitte
-                  kannst du jetzt unten exportieren.
+                  Die KI-Analyse wählt fünf Szenenvorschläge aus. Einzelne
+                  Abschnitte kannst du jetzt unten exportieren.
                 </p>
               </div>
               <button className="generate" disabled>
-                <Sparkles size={17} /> 10 Clips erstellen <span>Später</span>
+                <Sparkles size={17} /> 5 Clips erstellen <span>Später</span>
               </button>
             </aside>
           </div>

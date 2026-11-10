@@ -1,84 +1,74 @@
-# Prüfbericht · Phase 4 / v0.4.0
+# Prüfbericht · Phase 4 Fehlerbehebung / v0.4.1
 
-Stand: 8. November 2026. Entwicklung ausschließlich in Codex Cloud und GitHub
-Actions. Kein Terminal und keine Entwicklungsinstallation auf dem Mac des
-Nutzers. Phase 1–3 wurden vom Nutzer auf dem M1 mit 8 GB erfolgreich abgenommen.
+Stand: 10. November 2026. Alle Entwicklungsbefehle in Codex Cloud und GitHub
+Actions. Keine Terminal-Aktionen auf dem Mac des Nutzers.
 
-## Lokal erfolgreich
+## Ursache und Reproduktion
 
-- 12 Frontend-Unit-Tests, TypeScript- und Vite-Produktionsbuild.
-- 25 Rust-Kerntests: gewichtete Bewertung, 77-Sekunden-Smart-Story mit bestehenden
-  Grenzen 18–45 und 170–220, 3–5 Segmente, Überlappungen, Reihenfolge, Grenzen,
-  Belegzitate, Ablehnung unverbundener Beziehungen, Duplikate, 1000 Textstellen,
-  kurze Satzsegmente, zeitliche Abdeckung trotz Kandidatenbudget, Checkpoints,
-  Integrität, fehlende Modelle und laufender Prozessabbruch.
-- Simulierter Speichermangel im Test-Kindprozess: verständlicher Fehler,
-  keine erfundenen Kandidaten, temporäre Promptdateien werden entfernt.
-  Dies ist ausdrücklich kein gemessener M1-Speichertest.
-- Vier echte FFmpeg-Integrationstests: H.264/AAC/9:16-Export, stumme/hochkant
-  Quelle, Abbruch, Audioextraktion aus >300 Sekunden Video, beschädigte Eingabe,
-  lokale RMS-/Stilleanalyse und Bereinigung.
-- llama.cpp aus festgeschriebenem Quellcode unter Linux gebaut und CLI-Optionen
-  am tatsächlich gestarteten Programm geprüft.
-- Rustfmt, Prettier, Shellsyntax und Git-Diff-Prüfung.
+Die bisherige Analyse beendet bei einem JSON-Parsefehler den gesamten Lauf,
+bevor `evaluated` aktualisiert wird. Beim Fortsetzen wird deshalb derselbe
+Vergleich mit demselben Seed und denselben 900 Ausgabetokens wiederholt. Freie
+Textfelder hatten keine Längenbegrenzung; Thinking war nur über Prompt und Präfix
+abgeschaltet. Der Fehler ist durch einen gespeicherten Stand 28/28 Fenster,
+1/20 Vergleiche und dauerhaft abgeschnittene Antworten automatisiert reproduziert.
+Nach dem Fix werden alle verbleibenden Vergleiche verarbeitet, vorhandene
+Kandidaten bewahrt, höchstens zwei Versuche verbraucht und fünf unterschiedliche
+Szenen über gekennzeichnete Ersatzbewertungen ausgewählt. Ein erneuter Aufruf
+wiederholt abgeschlossene Fehlstellen nicht.
 
-11 Frontend-Browsertests simulieren die Tauri-Brücke und prüfen Import, Export,
-Whisper-UI sowie Qwen-Download, Abbruch, gemeinsame Verarbeitungssperre,
-Wiederherstellung, automatische Transkript-Aktualisierung und die Wiedergabe
-aller Playlist-Teile inklusive Lückensprung und Stopp am letzten Ende. Die kurze
-Browser-Videodatei verwendet kurze Vorschauintervalle; die 61–90-Sekunden-Regel
-wird separat im Rust-Kern geprüft.
+## Automatisierte Prüfungen
 
-## Echte KI- und macOS-Prüfung in GitHub Actions
+- Rust: 35 Kerntests einschließlich unvollständigem/abgeschnittenem JSON,
+  ungültigem UTF-8, Zusatzdaten, Ausgaben über 24 KiB, atomarem Speichern/Laden,
+  Migration alter Checkpoints, 28/28–1/20-Fortsetzung, dauerhaften Einzelproblemen,
+  wiederhergestellten transienten Fehlern und Abbruch ohne verbrauchten Versuch.
+- Fünfer-Auswahl mit sechs geeigneten zusammenhängenden Szenen, korrekten Dauern,
+  begrenzter Überlappung und einem Gegenbeispiel zur gierigen Auswahl: ein hoch
+  bewerteter überlappender Clip darf fünf bessere unterschiedliche Möglichkeiten
+  nicht auf vier reduzieren. Routine-Sprache erzwingt keine Füllclips.
+- Frontend: 14 Unit-Tests und 12 Browser-Vertragstests. Teilfehler dürfen nicht als
+  erfolgreiche Vollanalyse erscheinen; Ersatzbewertung, echte Auswahlanzahl,
+  Fortschritt, Abbruch, Wiederherstellung und vorhandene Import-/Exportfunktionen.
+- Bestehende echte FFmpeg-Tests einschließlich >300 Sekunden Audioextraktion,
+  9:16-/H.264-/AAC-Export und Bereinigung bleiben Bestandteil des Workflows.
+- Der tatsächliche gepinnte llama.cpp-Build akzeptiert `--reasoning-budget 0`
+  und `--reasoning-format none`; dies wurde ohne Modelldatei am CLI geprüft.
 
-Der Hugging-Face-Download ist in dieser Codex-Cloud-Umgebung gesperrt. Keine
-Umgehung eingerichtet. Deshalb lädt der kostenlose GitHub-Runner das tatsächlich
-verwendete Qwen-Modell über den App-Downloader und prüft Bytezahl und SHA-256.
+## Echte Modelltests und macOS-Build
 
-`speech-tests` transkribiert die echte englische JFK-Aufnahme mit base.en,
-prüft Text, Wort-/Segmentzeiten, mehrere Abschnitte, Speicherung und Abbruch.
-Das echte Transkript wird als Testartefakt an `scene-tests` weitergegeben.
-`scene-tests` führt tatsächliches Qwen aus: Ereignisse aus getrennten Fenstern,
-Smart-Story-Planung, inhaltliche Verbindung von Versprechen und späterem Ergebnis,
-77 Sekunden Gesamtdauer, unverbundene Rezept-/Spielszene als Negativkontrolle,
-Single-Scene-Bewertung sowie Qwen-Verarbeitung des tatsächlichen Sprachtranskripts.
+Hugging Face ist in dieser Codex-Cloud-Umgebung gesperrt. Die echten Modelltests
+laufen daher auf kostenlosen GitHub-Runnern, ohne die Netzrichtlinie zu umgehen.
+Der Speech-Job führt Whisper base.en mit der echten englischen JFK-Aufnahme aus.
+Der Scene-Job prüft mit tatsächlichem Qwen weiterhin den 77-Sekunden-Fall,
+Ablehnung unverbundener Szenen, Single Scene und das echte Whisper-Transkript.
+Zusätzlich bewertet Qwen fünf unterschiedliche vollständige humorvolle englische
+Testgeschichten mit jeweils 75 Sekunden. Die Fünfer-Auswahl muss alle fünf wählen.
+Diese Geschichten sind synthetische Transkript-Fixtures; es wird nicht behauptet,
+dass sie echte Streamer-Aufnahmen sind.
 
-Der kostenlose Standard-Runner `macos-15-intel` baut statische FFmpeg-, Whisper-
-und llama.cpp-Komponenten mit eingebettetem Metal für Intel und ARM64. Das
-App-Programm startet die mitgelieferten Komponenten aus einem unabhängigen
-Arbeitsverzeichnis. ARM64-Architektur, Ad-hoc-Signaturen, Lizenz-/Quellressourcen
-und DMG-Integrität werden geprüft. Die DMG wird gemountet und ihre ARM64-Dateien
-werden geprüft. Eine separate Kopie des DMG-Bundles erhält Intel-Testprogramme,
-damit die Pfadauflösung der verpackten App auch auf dem Intel-Host ausführbar ist.
-Die ausgelieferte ARM64-App wird dabei nicht verändert.
+Der bekannte kostenlose `macos-15-intel`-Workflow erzeugt die ARM64-App und DMG.
+Er prüft Komponentenausführung durch das App-Programm, Paketpfade, statische
+Komponenten mit eingebettetem Metal, ARM64-Architekturen, Signaturen und die
+Integrität der gemounteten DMG. Eine separate Paketkopie mit Intel-Testprogrammen
+prüft die Startpfade; die ausgelieferte ARM64-App wird nicht verändert.
 
-**Grenze:** Ein Intel-Runner kann die ARM64-App nicht ausführen. Ein tatsächlicher
-M1-GUI-Lauf, Metal-Auslastung und Spitzen-RAM-Verbrauch sind nicht in der Cloud
-verifiziert. Die Komponentenprüfung startet llama.cpp; sie ersetzt keinen
-vollständigen Qwen-Lauf in der ARM64-GUI. Der zusätzliche native Linux-Tauri-
-Check scheitert in Codex Cloud an fehlenden GTK-/GLib-Systembibliotheken;
-macOS-Kompilierung wird im dafür vorgesehenen GitHub-Job geprüft.
+Die endgültigen CI-Ergebnisse und der DMG-Link werden im neuen Pull Request
+festgehalten. Ein Intel-Runner kann die ARM64-App nicht ausführen. Tatsächliche
+M1-GUI-/Metal-Auslastung und Spitzen-RAM bleiben deshalb ein Gerätetest.
 
-Der endgültige CI-Status und der DMG-Link stehen im Pull Request #4.
+## Prüfung auf dem M1 ohne Terminal
 
-## M1-Abnahme ohne Terminal
+1. v0.4.1 aus der neuen DMG installieren und die alte App vorher beenden.
+2. Dasselbe unveränderte Video öffnen. Modelle und Transkript müssen vorhanden
+   bleiben; abgeschlossene Fenster werden nicht erneut transkribiert oder erkannt.
+3. Analyse fortsetzen: Die bisher problematische Stelle muss nach maximal zwei
+   Versuchen passiert werden. Fortschritt muss über 1/20 hinausgehen.
+4. Nach Ende die fünf ausgewählten Szenen ansehen, Ersatzbewertungen und eventuelle
+   Teilfehler prüfen. Bei weniger Treffern müssen Anzahl und Begründung erscheinen.
+5. App neu starten: Ergebnisse und Auswahl müssen wiederhergestellt werden.
+6. Bestehende Transkription, manuelle MP4-Ausgabe und Playlist-Vorschau prüfen.
+7. Bei einem langen Stream RAM und Metal in der Aktivitätsanzeige beobachten.
 
-1. Neue DMG im Finder installieren, ältere App vorher beenden und ersetzen.
-2. Die UI muss anzeigen, dass llama.cpp von der App erfolgreich gestartet wurde.
-3. Qwen grafisch herunterladen, einmal abbrechen und erneut laden; anschließend
-   muss die Integritätsprüfung erfolgreich sein. Vorhandenes base.en bleibt erhalten.
-4. Englischen Stream importieren, KI-Analyse starten. Bei fehlendem Transkript
-   muss zuerst Whisper laufen; das Transkript erscheint danach direkt oben.
-5. Single Scene und Smart Story ansehen. Teile müssen in der richtigen
-   Reihenfolge spielen; Lücken werden übersprungen. Zeiten sind nur ungefähr.
-6. Analyse abbrechen und fortsetzen, App neu öffnen und dieselbe unveränderte
-   Quelldatei importieren. Ergebnisse müssen wiederhergestellt werden.
-7. Ohne Internet erneut analysieren und bisherigen manuellen MP4-Testexport prüfen.
-8. In der Aktivitätsanzeige bei einem langen Stream Speicher und Metal-Verhalten
-   prüfen. Whisper und Qwen dürfen nicht gleichzeitig Modelle verarbeiten;
-   beendete Kindprozesse dürfen keine Modellressourcen weiter halten.
-
-KI-Qualität bleibt modellbedingt begrenzt. Es werden keine zehn Treffer erzwungen
-und keine sichere Erkennung jedes Zusammenhangs oder jeder Irreführung behauptet.
-Keine mehrteilige MP4-Ausgabe in Phase 4. Erzwungenes Beenden/Stromausfall kann
-Temporärdateien hinterlassen; normaler Abbruch räumt auf.
+Keine neuen Rendering-Funktionen: mehrteilige MP4-Ausgabe und Stapel-Export
+bleiben außerhalb dieser Fehlerbehebung. Wort-/Segmentzeiten sind weiterhin
+ungeprüfte Whisper-Näherungen; Scores sind keine Viralitätsgarantien.

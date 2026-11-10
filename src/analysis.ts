@@ -20,8 +20,25 @@ export interface Candidate {
   ratings: Record<string, number>;
   evidence: string[];
   timestampsApproximate: boolean;
+  evaluationMethod?: "qwen" | "deterministic";
 }
 export interface Analysis {
+  finished?: boolean;
+  status?:
+    | "running"
+    | "interrupted"
+    | "completed"
+    | "completed_with_errors"
+    | "insufficient_scenes";
+  selectedIds?: string[];
+  selectionMessage?: string;
+  failures?: {
+    stage: string;
+    id: string;
+    attempts: number;
+    code: string;
+    recovered: boolean;
+  }[];
   complete: boolean;
   model: string;
   nextWindow: number;
@@ -74,4 +91,16 @@ export function playlistStep(
       ? { index: index + 1, seek: parts[index + 1].start, finished: false }
       : { index, finished: true };
   return { index, finished: false };
+}
+
+export function analysisLabel(a: Analysis | null, active: boolean): string {
+  if (active) return "Analyse läuft";
+  if (!a) return "Noch keine Analyse vorhanden";
+  if (!(a.finished ?? a.complete))
+    return "Analyse unterbrochen · Fortsetzen möglich";
+  if (a.status === "completed_with_errors")
+    return "Analyse teilweise fehlgeschlagen · Verarbeitung beendet";
+  if ((a.selectedIds?.length ?? 0) < 5)
+    return "Analyse abgeschlossen · Keine fünf geeigneten Szenen gefunden";
+  return "Analyse abgeschlossen · Fünf Szenen ausgewählt";
 }
