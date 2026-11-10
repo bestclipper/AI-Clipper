@@ -40,9 +40,21 @@ jobs:
             ffmpeg -version | head -1
             exit 0
           fi
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
+          cat > "$RUNNER_TEMP/clipper-ubuntu.sources" <<'SOURCES'
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SOURCES
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
       - run: cargo test --manifest-path crates/media-core/Cargo.toml --locked -- --include-ignored --skip real_english_speech_timestamps_restore_chunking_and_cancel --skip real_qwen_semantic_linking_and_rejection
         env:
@@ -61,9 +73,21 @@ jobs:
             ffmpeg -version | head -1
             exit 0
           fi
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=1 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg cmake build-essential
+          cat > "$RUNNER_TEMP/clipper-ubuntu.sources" <<'SOURCES'
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SOURCES
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg cmake build-essential
       - uses: actions/cache/restore@v4
         id: whisper-cache
         with:
@@ -115,9 +139,21 @@ jobs:
             cmake --version | head -1
             exit 0
           fi
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g;s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=1 -o Acquire::https::Timeout=30 install -y --no-install-recommends cmake build-essential
+          cat > "$RUNNER_TEMP/clipper-ubuntu.sources" <<'SOURCES'
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SOURCES
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Dir::Etc::sourcelist="$RUNNER_TEMP/clipper-ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::https::Timeout=30 install -y --no-install-recommends cmake build-essential
       - uses: actions/cache/restore@v4
         id: llama-cache
         with:
