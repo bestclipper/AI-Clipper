@@ -36,6 +36,10 @@ jobs:
       - name: Install FFmpeg from Ubuntu repositories only
         timeout-minutes: 5
         run: |
+          if command -v ffmpeg >/dev/null && command -v cmake >/dev/null && command -v c++ >/dev/null; then
+            ffmpeg -version | head -1
+            exit 0
+          fi
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
       - run: cargo fmt --manifest-path crates/media-core/Cargo.toml -- --check
@@ -52,11 +56,36 @@ jobs:
       - name: Install speech test dependencies
         timeout-minutes: 5
         run: |
+          if command -v ffmpeg >/dev/null && command -v cmake >/dev/null && command -v c++ >/dev/null; then
+            ffmpeg -version | head -1
+            exit 0
+          fi
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends ffmpeg cmake build-essential
-      - run: bash scripts/build-whisper.sh
+      - uses: actions/cache/restore@v4
+        id: whisper-cache
+        with:
+          path: src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
+          key: linux-whisper-${{ hashFiles('scripts/build-whisper.sh') }}
+      - if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-whisper.sh
+      - if: steps.whisper-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src-tauri/binaries/whisper-cli-x86_64-unknown-linux-gnu
+          key: linux-whisper-${{ hashFiles('scripts/build-whisper.sh') }}
+      - uses: actions/cache/restore@v4
+        id: whisper-model-cache
+        with:
+          path: ${{ runner.temp }}/whisper-data/models
+          key: whisper-model-${{ hashFiles('crates/media-core/src/models.rs') }}
       - name: Download and verify the actual base.en model with the app downloader
         run: cargo run --manifest-path crates/media-core/Cargo.toml --locked --example download_model -- "$RUNNER_TEMP/whisper-data"
+      - if: steps.whisper-model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/whisper-data/models
+          key: whisper-model-${{ hashFiles('crates/media-core/src/models.rs') }}
       - name: Recognize real English speech and verify persistence and cancellation
         run: cargo test --manifest-path crates/media-core/Cargo.toml --locked --test transcription real_english_speech_timestamps_restore_chunking_and_cancel -- --include-ignored
         env:
@@ -80,6 +109,10 @@ jobs:
       - name: Install native inference build tools
         timeout-minutes: 5
         run: |
+          if command -v cmake >/dev/null && command -v c++ >/dev/null; then
+            cmake --version | head -1
+            exit 0
+          fi
           sudo apt-get -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" -o Dir::Etc::sourceparts="-" -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get install -y --no-install-recommends cmake build-essential
       - uses: actions/cache/restore@v4

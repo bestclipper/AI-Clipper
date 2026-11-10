@@ -18,7 +18,7 @@ wiederholt abgeschlossene Fehlstellen nicht.
 
 ## Automatisierte Prüfungen
 
-- Rust: 36 Kerntests einschließlich unvollständigem/abgeschnittenem JSON,
+- Rust: 38 Kerntests einschließlich unvollständigem/abgeschnittenem JSON,
   ungültigem UTF-8, Zusatzdaten, Ausgaben über 24 KiB, atomarem Speichern/Laden,
   Migration alter Checkpoints, 28/28–1/20-Fortsetzung, dauerhaften Einzelproblemen,
   wiederhergestellten transienten Fehlern und Abbruch ohne verbrauchten Versuch.

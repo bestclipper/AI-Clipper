@@ -188,7 +188,7 @@ fn events_schema(ids: &[usize], quotes: &[String]) -> Value {
 }
 fn judgment_schema() -> Value {
     object(
-        json!({"aContextReview":{"type":"string","maxLength":180,"minLength":1},"title":string(),"category":string(),"zVerdict":{"type":"string","enum":["accept","reject"]},"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
+        json!({"aContextReview":{"type":"string","maxLength":180,"minLength":1},"title":string(),"category":{"type":"string","enum":["Humor","Emotional reaction","Unexpected twist","Argument","Challenge","Conversation","Other"]},"zVerdict":{"type":"string","enum":["accept","reject"]},"relation":{"type":"string","enum":["single","setup_payoff","claim_reaction","question_answer","conflict_resolution","unrelated"]},"connectionScore":number(),"evidence":{"type":"array","maxItems":5,"items":string()},"ratings":object(json!({"entertainment":number(),"surprise":number(),"hook":number(),"clarity":number(),"tension":number(),"ending":number()}))}),
     )
 }
 pub struct DetectionReport {
@@ -288,7 +288,11 @@ impl Llama<'_> {
         ids: &[usize],
         cues: &[AudioCue],
     ) -> Result<Vec<Event>, String> {
-        self.detect_report(units, ids, cues).map(|r| r.events)
+        let report = self.detect_report(units, ids, cues)?;
+        if report.proposed > 0 && report.events.is_empty() {
+            return Err("MODEL_VALIDATION: Keine belegbaren Ereignisse in der KI-Antwort.".into());
+        }
+        Ok(report.events)
     }
     pub fn detect_report(
         &mut self,
@@ -418,7 +422,7 @@ impl Llama<'_> {
             });
         }
         let data=plan.parts.iter().map(|p|{let before=p.first.checked_sub(1).map(|id|units[id].text.clone());let after=units.get(p.last+1).map(|u|u.text.clone());json!({"first":p.first,"last":p.last,"selected":scenes::span_text(units,p),"before_not_selected":before,"after_not_selected":after})}).collect::<Vec<_>>();
-        let prompt=format!("Rate this English streamer clip for funny, emotional or surprising entertainment, not just fluent speech. Six ratings 1–10: entertainment, surprise/emotion, hook, clarity, tension, ending. Briefly review missing context/qualifiers in aContextReview. Give title/category. connectionScore is the weakest story link, no bonus for more cuts. Choose one source quote per part. zVerdict accept only if entertaining, self-contained and with a meaningful ending; otherwise reject. Do not mistake a future promise for a completed action. Adjacent context is not selected. SOURCE: {}",serde_json::to_string(&data).unwrap());
+        let prompt=format!("Judge the selected English streamer clip, using all selected dialogue. Rate 1–10: entertainment (funny, emotional, surprising), surprise/emotion, opening hook, clarity, tension and meaningful ending. Do not reward mere fluent speech. Briefly describe any necessary missing context in aContextReview. Unknown names or game rules are NOT missing context when the spoken setup and outcome are clear. A bet followed by its result is self-contained; a promised future punishment need not have happened yet. For multiple parts require the same actual claim/event, not mood or contrast. Adjacent NOT SELECTED context is only for checking misleading omissions. Give an English title and scene genre, one source quote per part and the weakest-link connectionScore; never reward more cuts. Finally accept only entertaining, understandable clips with a meaningful ending (clarity >=6, hook/ending >=5, entertainment >=6 or surprise >=7). Otherwise reject. Never invent events or treat future actions as completed. SOURCE: {}",serde_json::to_string(&data).unwrap());
         let mut schema = judgment_schema();
         let options = plan
             .parts
@@ -451,6 +455,19 @@ impl Llama<'_> {
                     *quote = corrected;
                 }
             }
+        }
+        if !value.ratings.valid()
+            || !matches!(value.z_verdict.as_str(), "accept" | "reject")
+            || value.evidence.len() != plan.parts.len()
+            || (plan.parts.len() > 1
+                && (!value.connection_score.is_finite()
+                    || !(1. ..=10.).contains(&value.connection_score)))
+            || (value.z_verdict == "accept"
+                && (value.title.trim().is_empty() || value.category.trim().is_empty()))
+        {
+            return Err(
+                "MODEL_VALIDATION: Ungültige Bewertung oder unvollständige Pflichtfelder.".into(),
+            );
         }
         // One explicit final verdict covers context and quality; no contradictory booleans.
         let accept = value.z_verdict == "accept" && !value.a_context_review.trim().is_empty();
@@ -584,6 +601,7 @@ fn attempt<T>(
             Ok(value) => {
                 if let Some(f) = a.failures.iter_mut().find(|f| f.id == id) {
                     f.recovered = true;
+                    f.attempts = used + 1;
                 }
                 return Ok(Some(value));
             }
@@ -604,6 +622,14 @@ fn attempt<T>(
                 });
                 save(root, a)?;
             }
+        }
+    }
+    if let Some(f) = a.failures.iter_mut().find(|f| f.id == id) {
+        if f.attempts < MAX_ATTEMPTS {
+            f.attempts = MAX_ATTEMPTS;
+            f.recovered = false;
+            f.code = "interrupted_attempts".into();
+            save(root, a)?;
         }
     }
     if !a.failures.iter().any(|f| f.id == id) {
@@ -746,10 +772,17 @@ fn finish(a: &mut Analysis) {
         "completed"
     }
     .into();
-    a.selection_message = if a.selected_ids.len() < 5 {
-        format!("{} von 5 geeigneten, unterschiedlichen Szenen gefunden. Weitere Vorschläge erfüllten Unterhaltung, Einstieg, Abschluss, Dauer oder Überlappungsgrenze nicht. {} KI-Schritte meldeten Fehler; Ersatzbewertungen sind gekennzeichnet.",a.selected_ids.len(),failed)
+    let count = a.selected_ids.len();
+    let pool = a.candidates.len();
+    a.selection_message = if count < 5 {
+        let reason = if pool >= 5 {
+            format!("{pool} Vorschläge genügen den Qualitätsregeln, aber nur {count} lassen sich mit höchstens 20 % Überlappung kombinieren.")
+        } else {
+            format!("Nach Dauer-, Unterhaltungs-, Einstiegs- und Abschlussprüfung stehen {pool} geeignete Vorschläge zur Verfügung.")
+        };
+        format!("{count} von 5 geeigneten unterschiedlichen Szenen gefunden. {reason} {failed} KI-Schritte dauerhaft fehlgeschlagen; Ersatzbewertungen sind gekennzeichnet. Es werden keine Füllclips erzwungen.")
     } else {
-        format!("Die 5 besten unterschiedlichen Szenen wurden ausgewählt. {} KI-Schritte meldeten Fehler; Ersatzbewertungen sind gekennzeichnet.",failed)
+        format!("Die 5 besten unterschiedlichen Szenen wurden aus {pool} geeigneten Vorschlägen ausgewählt. {failed} KI-Schritte dauerhaft fehlgeschlagen; Ersatzbewertungen sind gekennzeichnet.")
     };
 }
 fn retain_events(events: &mut Vec<Event>, units: &[Unit], duration: f64) {
@@ -1054,6 +1087,30 @@ mod failure_tests {
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
     #[test]
+    fn invalid_structured_ratings_are_a_retryable_model_error() {
+        let root = tempfile::tempdir().unwrap();
+        let response = json!({"aContextReview":"Self-contained source.","title":"Source scene","category":"Humor","relation":"single","connectionScore":10,"evidence":[unit()[0].text],"ratings":{"entertainment":42,"surprise":8,"hook":8,"clarity":8,"tension":8,"ending":8},"zVerdict":"accept"});
+        let binary = component(root.path(), &format!("cat <<'JSON'\n{response}\nJSON"));
+        let cancel = AtomicBool::new(false);
+        let mut l = Llama {
+            binary: &binary,
+            model: Path::new("unused-test-model"),
+            root: root.path(),
+            cancel: &cancel,
+            cpu_fallback_used: false,
+            retry: 0,
+        };
+        let p = Plan {
+            id: "invalid-rating".into(),
+            parts: vec![Span { first: 0, last: 0 }],
+            event_ids: vec![],
+        };
+        assert!(l
+            .judge(&p, &unit())
+            .unwrap_err()
+            .contains("MODEL_VALIDATION"));
+    }
+    #[test]
     fn missing_qwen_model_fails_before_processing() {
         let root = tempfile::tempdir().unwrap();
         let cancel = AtomicBool::new(false);
@@ -1336,7 +1393,7 @@ mod recovery_tests {
         .unwrap();
         finish(&mut a);
         assert!(a.complete);
-        assert!(a.failures.iter().all(|f| f.recovered));
+        assert!(a.failures.iter().all(|f| f.recovered && f.attempts == 2));
         assert_eq!(a.status, "insufficient_scenes");
     }
     #[test]
@@ -1415,6 +1472,45 @@ mod recovery_tests {
             .candidates
             .iter()
             .all(|c| c.mode == "single_scene" && c.evaluation_method == "deterministic"));
+    }
+    #[test]
+    fn exhausted_persisted_attempts_after_crash_are_not_repeated() {
+        let root = tempfile::tempdir().unwrap();
+        let t = transcript();
+        let u = scenes::make_units(&t);
+        let mut a = state(&t);
+        a.plans = vec![Plan {
+            id: "crashed".into(),
+            parts: vec![Span { first: 0, last: 2 }],
+            event_ids: vec![],
+        }];
+        a.attempts.insert("plan:crashed".into(), 2);
+        a.failures.push(StepFailure {
+            recovered: false,
+            stage: "comparison".into(),
+            id: "plan:crashed".into(),
+            attempts: 1,
+            code: "incomplete_json".into(),
+        });
+        save(root.path(), &a).unwrap();
+        let mut engine = FakeEngine::default();
+        run_steps(
+            root.path(),
+            &mut a,
+            &t,
+            &u,
+            &[],
+            &AtomicBool::new(false),
+            &mut engine,
+            &mut |_| {},
+        )
+        .unwrap();
+        finish(&mut a);
+        assert!(engine.calls.is_empty());
+        assert_eq!(a.evaluated, 1);
+        assert_eq!(a.failures[0].attempts, 2);
+        assert_eq!(a.failures[0].code, "interrupted_attempts");
+        assert_eq!(a.selected_ids.len(), 1);
     }
     #[test]
     fn routine_speech_does_not_force_five_fallbacks() {
