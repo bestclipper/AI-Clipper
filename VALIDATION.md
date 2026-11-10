@@ -18,14 +18,15 @@ wiederholt abgeschlossene Fehlstellen nicht.
 
 ## Automatisierte Prüfungen
 
-- Rust: 35 Kerntests einschließlich unvollständigem/abgeschnittenem JSON,
+- Rust: 36 Kerntests einschließlich unvollständigem/abgeschnittenem JSON,
   ungültigem UTF-8, Zusatzdaten, Ausgaben über 24 KiB, atomarem Speichern/Laden,
   Migration alter Checkpoints, 28/28–1/20-Fortsetzung, dauerhaften Einzelproblemen,
   wiederhergestellten transienten Fehlern und Abbruch ohne verbrauchten Versuch.
 - Fünfer-Auswahl mit sechs geeigneten zusammenhängenden Szenen, korrekten Dauern,
   begrenzter Überlappung und einem Gegenbeispiel zur gierigen Auswahl: ein hoch
   bewerteter überlappender Clip darf fünf bessere unterschiedliche Möglichkeiten
-  nicht auf vier reduzieren. Routine-Sprache erzwingt keine Füllclips.
+  nicht auf vier reduzieren. Fast identische Schnittgrenzen bleiben bis zur
+  Auswahl erhalten, wenn nur eine davon fünf kompatible Szenen ermöglicht. Routine-Sprache erzwingt keine Füllclips.
 - Frontend: 14 Unit-Tests und 12 Browser-Vertragstests. Teilfehler dürfen nicht als
   erfolgreiche Vollanalyse erscheinen; Ersatzbewertung, echte Auswahlanzahl,
   Fortschritt, Abbruch, Wiederherstellung und vorhandene Import-/Exportfunktionen.

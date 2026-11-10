@@ -672,6 +672,9 @@ fn run_steps(
             a.plans.push(p);
         }
     }
+    if a.evaluated > a.plans.len() {
+        return Err("Analyse-Zwischenspeicher enthält einen ungültigen Vergleichszähler.".into());
+    }
     a.total_plans = a.plans.len();
     save(root, a)?;
     for index in a.evaluated..a.plans.len() {
@@ -730,13 +733,7 @@ fn run_steps(
     Ok(())
 }
 fn finish(a: &mut Analysis) {
-    a.candidates = scenes::rank_deduplicate(
-        a.candidates
-            .iter()
-            .filter(|c| selection::qualifies(c))
-            .cloned()
-            .collect(),
-    );
+    a.candidates = selection::rank_pool(&a.candidates);
     a.selected_ids = selection::best_five(&a.candidates);
     a.finished = true;
     let failed = a.failures.iter().filter(|f| !f.recovered).count() + a.skipped_context;

@@ -200,14 +200,33 @@ pub fn strongly_overlap(a: &Candidate, b: &Candidate) -> bool {
         .sum();
     intersection / a.total_duration.min(b.total_duration).max(0.001) > 0.2
 }
+/// Different boundaries can have different compatibility with a fifth scene.
+/// Only exact source intervals are redundant before diversity selection.
+pub fn rank_pool(candidates: &[Candidate]) -> Vec<Candidate> {
+    let mut ranked = candidates
+        .iter()
+        .filter(|c| qualifies(c))
+        .cloned()
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(a.segments.len().cmp(&b.segments.len()))
+            .then(a.id.cmp(&b.id))
+    });
+    let mut seen = HashSet::new();
+    ranked.retain(|c| {
+        seen.insert(
+            c.segments
+                .iter()
+                .map(|s| (s.start.to_bits(), s.end.to_bits()))
+                .collect::<Vec<_>>(),
+        )
+    });
+    ranked
+}
 pub fn best_five(candidates: &[Candidate]) -> Vec<String> {
-    let ranked = rank_deduplicate(
-        candidates
-            .iter()
-            .filter(|c| qualifies(c))
-            .cloned()
-            .collect(),
-    );
+    let ranked = rank_pool(candidates);
     let mut beam: Vec<Vec<usize>> = vec![vec![]];
     for (index, c) in ranked.iter().enumerate() {
         let mut next = beam.clone();
@@ -239,7 +258,13 @@ pub fn best_five(candidates: &[Candidate]) -> Vec<String> {
                 .then(a.cmp(b))
         });
         next.dedup();
-        next.truncate(256);
+        // Preserve partial solutions even after some five-scene sets exist.
+        let mut counts = [0usize; 6];
+        next.retain(|group| {
+            let count = &mut counts[group.len()];
+            *count += 1;
+            *count <= 128
+        });
         beam = next;
     }
     beam.first()
@@ -251,6 +276,31 @@ pub fn best_five(candidates: &[Candidate]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn near_duplicate_boundaries_can_enable_the_fifth_scene() {
+        let u=vec![Unit{id:0,start:0.,end:75.,text:"Watch this ridiculous bet! No way, I cannot believe the hilarious surprise. Finally I lost, that is the punchline!".into(),approximate:true}];
+        let p = Plan {
+            id: "base".into(),
+            parts: vec![Span { first: 0, last: 0 }],
+            event_ids: vec![],
+        };
+        let base = fallback(&p, &u, &[], 900.).unwrap();
+        let mut candidates = vec![];
+        for (i, start) in [100., 108., 48., 300., 450., 600.].into_iter().enumerate() {
+            let mut c = base.clone();
+            c.id = format!("variant{i}");
+            c.segments[0].start = start;
+            c.segments[0].end = start + 75.;
+            c.score = 9.9 - i as f64 * 0.2;
+            candidates.push(c);
+        }
+        assert_eq!(rank_pool(&candidates).len(), 6);
+        let ids = best_five(&candidates);
+        assert_eq!(ids.len(), 5);
+        assert!(ids.contains(&"variant1".into()));
+        assert!(ids.contains(&"variant2".into()));
+        assert!(!ids.contains(&"variant0".into()));
+    }
     #[test]
     fn five_distinct_scenes_win_over_a_high_scoring_overlapping_scene() {
         let u=vec![Unit{id:0,start:0.,end:75.,text:"Watch this ridiculous bet! No way, I cannot believe the hilarious surprise. Finally I lost, that is the punchline!".into(),approximate:true}];
