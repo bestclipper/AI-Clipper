@@ -108,7 +108,7 @@ fn real_qwen_semantic_linking_and_rejection() {
         "Watch this funny balloon challenge! I bet this tiny balloon could lift my paper crown. I promised it would float majestically. No way, the balloon popped and the crown landed in my soup! I cannot believe that surprise. Everyone laughed at the ridiculous mess. Finally I lost the challenge because the crown sank like a stone. That was the unexpected punchline. Never again!",
         "Watch this ridiculous spicy snack bet! I promised I would not need any milk. The first bite seemed harmless. No way, suddenly I was hiccupping so loudly the microphone clipped! I cannot believe this unexpected reaction. My friends laughed at the funny hiccups. Finally I lost the bet and drank the whole glass of milk. That is the punchline: the snack defeated me. Never again!",
         "Watch this hilarious selfie challenge! I bet I could take the perfect picture while the sprinkler was off. I promised I had checked the timer. No way, the water switched on exactly when I smiled! I cannot believe that surprise. Everyone laughed at the ridiculous photo of my shocked face. Finally I lost the bet because the timer was set for that very minute. That is the punchline. Never again!",
-        "Watch this funny magic trick bet! I promised to make the cookie disappear without eating it. I hid it under a cup and made a dramatic speech. No way, my dog grabbed the cookie while I was talking! I cannot believe the unexpected ending. Everyone laughed at the hilarious real disappearance. Finally I lost the bet because the dog won the snack. That is the punchline. Never again!"
+        "Watch this funny magic trick bet! I promised to make the cookie disappear without anyone eating it. I hid it under a cup and made a dramatic speech. No way, my dog grabbed the cookie while I was talking! I cannot believe the unexpected ending. Everyone laughed at the hilarious real disappearance. Finally I lost the bet because the dog won the snack. That is the punchline. Never again!"
     ];
     let five_units = stories
         .iter()
@@ -132,12 +132,17 @@ fn real_qwen_semantic_linking_and_rejection() {
             event_ids: vec![],
         };
         let j = llama.judge(&plan, &five_units).unwrap();
-        let candidate = validate_candidate(&plan, j, &five_units, 500.)
-            .expect("Complete humorous story must be eligible");
-        assert!(clipper_media::selection::qualifies(&candidate));
-        candidates.push(candidate);
+        println!(
+            "Synthetic five-story fixture {id}: {}",
+            serde_json::to_string(&j).unwrap()
+        );
+        if let Ok(candidate) = validate_candidate(&plan, j, &five_units, 500.) {
+            if clipper_media::selection::qualifies(&candidate) {
+                candidates.push(candidate);
+            }
+        }
     }
-    assert_eq!(clipper_media::selection::best_five(&candidates).len(), 5);
+    assert_eq!(clipper_media::selection::best_five(&candidates).len(),5,"Five complete entertaining source stories must qualify; see per-fixture actual model ratings above");
     println!("Actual Qwen: five distinct entertaining 75-second scenes selected.");
     // A pre-cancelled inference must never launch or allocate a model.
     let cancelled = AtomicBool::new(true);
