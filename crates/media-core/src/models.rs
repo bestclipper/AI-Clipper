@@ -13,6 +13,39 @@ pub const MODEL_ID: &str = "base.en";
 pub const MODEL_BYTES: u64 = 147_964_211;
 pub const MODEL_SHA256: &str = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002";
 pub const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin";
+#[derive(Clone, Copy)]
+pub struct ModelSpec {
+    pub id: &'static str,
+    pub file: &'static str,
+    pub bytes: u64,
+    pub sha256: &'static str,
+    pub url: &'static str,
+}
+pub const WHISPER: ModelSpec = ModelSpec {
+    id: MODEL_ID,
+    file: "ggml-base.en.bin",
+    bytes: MODEL_BYTES,
+    sha256: MODEL_SHA256,
+    url: MODEL_URL,
+};
+pub const QWEN:ModelSpec=ModelSpec{id:"Qwen3-1.7B-Q4_K_M",file:"Qwen3-1.7B-Q4_K_M.gguf",bytes:1282439264,sha256:"d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",url:"https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/daeb8e2d528a760970442092f6bf1e55c3b659eb/Qwen3-1.7B-Q4_K_M.gguf"};
+pub fn spec_path(root: &Path, spec: ModelSpec) -> PathBuf {
+    root.join("models").join(spec.file)
+}
+pub fn spec_status(root: &Path, spec: ModelSpec) -> ModelStatus {
+    ModelStatus {
+        id: spec.id.into(),
+        ready: verify_file(
+            &spec_path(root, spec),
+            spec.bytes,
+            spec.sha256,
+            &AtomicBool::new(false),
+        )
+        .is_ok(),
+        bytes: spec.bytes,
+        sha256: spec.sha256.into(),
+    }
+}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStatus {
@@ -50,7 +83,7 @@ pub fn sha256_file(path: &Path, cancel: &AtomicBool) -> Result<String, String> {
 }
 pub fn verify_file(path: &Path, bytes: u64, hash: &str, cancel: &AtomicBool) -> Result<(), String> {
     if fs::metadata(path)
-        .map_err(|_| "Modell fehlt. Bitte zuerst base.en herunterladen.")?
+        .map_err(|_| "Modell fehlt. Bitte das benötigte Modell zuerst herunterladen.")?
         .len()
         != bytes
         || sha256_file(path, cancel)? != hash
@@ -60,25 +93,22 @@ pub fn verify_file(path: &Path, bytes: u64, hash: &str, cancel: &AtomicBool) -> 
     Ok(())
 }
 pub fn model_status(root: &Path) -> ModelStatus {
-    ModelStatus {
-        id: MODEL_ID.into(),
-        ready: verify_file(
-            &model_path(root),
-            MODEL_BYTES,
-            MODEL_SHA256,
-            &AtomicBool::new(false),
-        )
-        .is_ok(),
-        bytes: MODEL_BYTES,
-        sha256: MODEL_SHA256.into(),
-    }
+    spec_status(root, WHISPER)
 }
 pub async fn download_model(
     root: &Path,
     cancel: &AtomicBool,
+    notify: impl FnMut(ModelProgress),
+) -> Result<ModelStatus, String> {
+    download_spec(root, WHISPER, cancel, notify).await
+}
+pub async fn download_spec(
+    root: &Path,
+    spec: ModelSpec,
+    cancel: &AtomicBool,
     mut notify: impl FnMut(ModelProgress),
 ) -> Result<ModelStatus, String> {
-    let path = model_path(root);
+    let path = spec_path(root, spec);
     fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let mut temp =
         tempfile::NamedTempFile::new_in(path.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -89,7 +119,7 @@ pub async fn download_model(
         .timeout(Duration::from_secs(3600))
         .build()
         .map_err(|e| e.to_string())?;
-    let response = tokio::select! { r=client.get(MODEL_URL).send()=>r.map_err(|e|format!("Modell-Download nicht erreichbar: {e}"))?, _=wait_cancel(cancel)=>return Err("Download abgebrochen.".into()) };
+    let response = tokio::select! { r=client.get(spec.url).send()=>r.map_err(|e|format!("Modell-Download nicht erreichbar: {e}"))?, _=wait_cancel(cancel)=>return Err("Download abgebrochen.".into()) };
     let response = response
         .error_for_status()
         .map_err(|e| format!("Modell-Download fehlgeschlagen: {e}"))?;
@@ -101,19 +131,19 @@ pub async fn download_model(
     {
         let chunk = chunk.map_err(|e| format!("Modell-Download unterbrochen: {e}"))?;
         received += chunk.len() as u64;
-        if received > MODEL_BYTES {
+        if received > spec.bytes {
             return Err("Download hat eine unerwartete Dateigröße.".into());
         }
         temp.write_all(&chunk)
             .map_err(|e| format!("Modell konnte nicht gespeichert werden: {e}"))?;
         hash.update(&chunk);
-        let percent = received as f64 / MODEL_BYTES as f64 * 99.;
-        if percent - last >= 0.25 || received == MODEL_BYTES {
+        let percent = received as f64 / spec.bytes as f64 * 99.;
+        if percent - last >= 0.25 || received == spec.bytes {
             last = percent;
             notify(ModelProgress {
                 phase: "downloading".into(),
                 received_bytes: received,
-                total_bytes: MODEL_BYTES,
+                total_bytes: spec.bytes,
                 percent,
             });
         }
@@ -121,13 +151,13 @@ pub async fn download_model(
     notify(ModelProgress {
         phase: "verifying".into(),
         received_bytes: received,
-        total_bytes: MODEL_BYTES,
+        total_bytes: spec.bytes,
         percent: 99.,
     });
     if cancel.load(Ordering::SeqCst) {
         return Err("Download abgebrochen.".into());
     }
-    if received != MODEL_BYTES || format!("{:x}", hash.finalize()) != MODEL_SHA256 {
+    if received != spec.bytes || format!("{:x}", hash.finalize()) != spec.sha256 {
         return Err(
             "Integritätsprüfung fehlgeschlagen. Das Modell wurde nicht installiert.".into(),
         );
@@ -137,14 +167,14 @@ pub async fn download_model(
     notify(ModelProgress {
         phase: "complete".into(),
         received_bytes: received,
-        total_bytes: MODEL_BYTES,
+        total_bytes: spec.bytes,
         percent: 100.,
     });
     Ok(ModelStatus {
-        id: MODEL_ID.into(),
+        id: spec.id.into(),
         ready: true,
-        bytes: MODEL_BYTES,
-        sha256: MODEL_SHA256.into(),
+        bytes: spec.bytes,
+        sha256: spec.sha256.into(),
     })
 }
 async fn wait_cancel(cancel: &AtomicBool) {

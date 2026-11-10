@@ -1,6 +1,6 @@
 [package]
 name = "ai-clipper"
-version = "0.3.0"
+version = "0.4.1"
 description = "Local video workspace for Apple Silicon"
 authors = ["AI Clipper contributors"]
 edition = "2021"

@@ -113,6 +113,9 @@ fn real_english_speech_timestamps_restore_chunking_and_cancel() {
     assert!(transcript.segments.iter().any(|s| !s.words.is_empty()));
     assert_eq!(*events.last().unwrap(), 100.);
     assert!(events.windows(2).all(|p| p[0] <= p[1]));
+    if let Some(output) = std::env::var_os("AI_CLIPPER_TEST_TRANSCRIPT_OUTPUT") {
+        std::fs::write(output, serde_json::to_vec(&transcript).unwrap()).unwrap();
+    }
     let restored = load_transcript(&root, &source).unwrap().unwrap();
     assert_eq!(restored.segments.len(), transcript.segments.len());
     let multi = transcribe_chunked(&tools, &whisper, &root, &source, &cancel, 5., |_| {}).unwrap();

@@ -1,6 +1,110 @@
-# AI Clipper · Phase 3
+# AI Clipper · Phase 4 · v0.4.1
 
-Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe und whisper.cpp**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
+Kostenlose lokale macOS-App für Apple Silicon, mit Tauri 2, React, TypeScript und **mitgeliefertem FFmpeg/FFprobe, whisper.cpp und llama.cpp**. Zielgerät: MacBook Air M1 mit 8 GB RAM, macOS 12 oder neuer.
+
+## Fehlerbehebung: Analyse fortsetzen und fünf Szenen auswählen
+
+Installiere **v0.4.1** wie unten beschrieben. Modelle, Transkript und bisherige
+Analyse bleiben im bestehenden App-Datenordner. Importiere dieselbe unveränderte
+Videodatei und klicke **KI-Analyse fortsetzen**. Bereits bearbeitete Fenster und
+Vergleiche werden übernommen; kein Terminal und kein erneuter Modelldownload nötig.
+
+- JSON-Ausgaben sind durch kurze Felder und Originalzitate begrenzt. Qwen-Thinking
+  ist per leerem Thinking-Präfix, `/no_think` und CLI-Budget 0 deaktiviert.
+- Pro Schritt höchstens zwei persistierte Versuche: zunächst 768, danach 1536
+  Ausgabetokens mit geändertem Seed; 6144 Kontexttokens, vier Threads, Batches
+  128/64 und ein Timeout von 180 Sekunden pro Prozess. Metal hat bei einem
+  Prozessfehler weiterhin einen einmaligen CPU-Fallback. Ein Parsefehler allein
+  löst keinen zusätzlichen GPU-/CPU-Doppellauf aus.
+- Ein abgeschnittenes, ungültiges oder übergroßes JSON wird nicht als Ergebnis
+  übernommen. Nach dauerhaftem Fehler folgen eine gekennzeichnete lokale
+  Ersatzbewertung und der nächste Schritt. Versuche und Fortschritt werden atomar
+  gespeichert; ein Abbruch verbraucht keinen Fehlversuch. Es gibt keinen endlosen
+  Neustart am selben Vergleich.
+- Die lokale Ersatzbewertung nutzt belegbare Textsignale für Humor, Überraschung,
+  Emotion, Einstieg und Abschluss sowie Audiointensität als Zusatzsignal. Sie
+  bestätigt keine frei erfundenen Story-Verknüpfungen und ist **keine semantische
+  Qwen-Bestätigung**. Ungeprüfte Smart Stories werden nicht zusammengesetzt;
+  allenfalls geeignete zusammenhängende Originalabschnitte bleiben übrig.
+- Nach der Verarbeitung wählt die App automatisch bis zu **fünf** hochwertige,
+  unterschiedliche Szenen aus. Unterhaltungswert/Überraschung, Hook, Klarheit und
+  Abschluss müssen Mindestwerte erfüllen. Zwischen ausgewählten Clips dürfen
+  höchstens 20 % der kürzeren Szene zeitlich überlappen. 65–80 Sekunden werden bei
+  vergleichbarer Bewertung bevorzugt; alle Grenzen bleiben 61–90 Sekunden.
+- **Analyse läuft**, **Analyse unterbrochen**, **Analyse abgeschlossen** und
+  **Analyse teilweise fehlgeschlagen · Verarbeitung beendet** sind getrennte
+  Zustände. Bei weniger als fünf Treffern werden Anzahl und Einschränkungen
+  angezeigt. Abgearbeitete Schritte mit Ersatzbewertungen werden nicht als
+  vollständig erfolgreiche KI-Analyse bezeichnet oder automatisch erneut versucht.
+
+Die Auswahl bezieht sämtliche Transkriptfenster ein; nicht nur die bisherigen
+20 Ereignisvergleiche. Die deterministische Vorauswahl und die begrenzte Suche
+können trotzdem Highlights übersehen. Fünf Ergebnisse werden nicht durch
+beliebige Füllclips erzwungen. Scores bleiben Einschätzungen. Der tatsächliche
+M1-Spitzenverbrauch muss auf dem Gerät geprüft werden; die zusätzlichen
+Kontexttokens sind begrenzt und Modelle laufen weiterhin nacheinander.
+
+## Phase 4 · lokale Szenenanalyse
+
+Nach dem Videoimport im Bereich **KI-Analyse · Szenenvorschläge** das kostenlose
+Qwen-Modell herunterladen (einmalig 1,28 GB). Whisper base.en muss ebenfalls
+installiert sein. **KI-Analyse starten** erstellt bei Bedarf zuerst das englische
+Transkript und analysiert dann das gesamte Video. Keine Terminal-Installation,
+kein API-Schlüssel und kein Video-Upload. Nach dem Modelldownload offline nutzbar.
+
+- **Single Scene:** ein zusammenhängender Originalabschnitt mit 61–90 Sekunden.
+- **Smart Story:** 2–5 chronologische, nicht überlappende Originalabschnitte,
+  zusammen 61–90 Sekunden, möglichst nahe 75 Sekunden. Erst Ereignisse in
+  überlappenden Fenstern erkennen, dann globale Themen und konkrete Aussagen
+  vergleichen. Eine unabhängige Faktenprüfung muss zuerst einen konkreten Zusammenhang erkennen. Die anschließende Bewertung muss Zusammenhang und Verständlichkeit
+  anhand der Originalaussagen begründen. Unbelegte oder unpassende Vorschläge
+  werden verworfen; fünf Treffer werden nicht erzwungen.
+- Die Liste ist nach Score sortiert. Details enthalten Originalzeiten,
+  englischen Titel, Kategorie, Begründung, Belegzitate und Einzelbewertungen.
+  **Smart Story als Playlist ansehen** spielt die Teile im Originalvideo ab
+  und überspringt die Lücken. Es wird keine zusammengesetzte MP4 gerendert.
+- Abbruch beendet den Kindprozess und räumt temporäre Dateien auf. Erneuter
+  Import derselben unveränderten Datei stellt Ergebnisse wieder her.
+  **KI-Analyse fortsetzen** nutzt abgeschlossene Fenster und Bewertungen weiter.
+
+### Modell, Ressourcen und Grenzen
+
+llama.cpp wird statisch mit eingebettetem Metal in der App gebündelt. Verwendet
+wird **Qwen3 1.7B GGUF Q4_K_M**, 1.282.439.264 Bytes, Apache 2.0,
+Quantisierung vom llama.cpp-Team `ggml-org`. Downloadquelle und SHA-256 sind in
+`crates/media-core/src/models.rs` fest an einen Repository-Commit gebunden;
+Dateigröße und vollständiger SHA-256 werden vor Verwendung geprüft.
+Originalmodell: <https://huggingface.co/Qwen/Qwen3-1.7B>.
+Quantisierung: <https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/tree/daeb8e2d528a760970442092f6bf1e55c3b659eb>.
+
+Ein gemeinsamer Backend-Lock verhindert parallele Whisper-, Qwen- und
+Exportprozesse. Kontext 6144 Tokens, vier Threads, kleine Batches, mmap,
+keine vollständigen Video- oder Audiokopien im RAM. Audio wird abschnittsweise
+(maximal fünf Minuten) als mono 16-kHz-PCM analysiert. RMS, Spitzen, Änderungen
+und Stille sind Zusatzsignale; kein verlässlicher Lach-/Sprecherwechseldetektor.
+Jede Inferenz beendet ihren Prozess und gibt Modellressourcen frei; bei
+Metal-Problemen einmaliger CPU-Fallback. Auf dem M1 kann dies lange dauern.
+
+Alle Transkriptfenster werden verarbeitet. Für begrenzten Aufwand bleiben maximal
+256 zeitlich verteilte Ereignisse, 32 Anker, 96 Ereigniskombinationen und bis zu 160 zusätzliche Einzelkandidaten aus allen Transkriptfenstern erhalten.
+Alle gültigen, deduplizierten Bewertungskandidaten sind in der Liste einblendbar.
+Globale Nachbarn werden mit semantischen Modellbeschreibungen vorgefiltert;
+dadurch können Beziehungen übersehen werden. Dies ist keine Garantie, jeden
+besten Moment oder jede irreführende Kombination zu erkennen. Scores (1–10)
+sind KI-Einschätzungen, keine Viralitätswahrscheinlichkeit: Unterhaltung 25 %,
+Überraschung/Emotion 20 %, Hook 20 %, Klarheit 15 %, Spannung 10 %, Abschluss
+10 %. Smart Story wird zusätzlich durch die schwächste Verbindung begrenzt und
+leicht pro zusätzlichem Schnitt abgewertet. Mehr Segmente bringen keinen Bonus.
+
+Schnittgrenzen stammen ausschließlich aus Whisper-Segment-/Wortzeiten,
+möglichst an Satzenden. Diese Zeiten bleiben ungeprüfte Näherungen.
+Keine erfundenen Sekunden und keine verdeckte Verlängerung zu kurzer Szenen.
+Daten liegen in `~/Library/Application Support/com.aiclipper.desktop/`
+(`models`, `projects`, `analyses`). Kein Upload, keine Telemetrie.
+
+Phase 5 folgt später: mehrteiliger MP4-Export und
+Stapelverarbeitung sowie Untertitel im exportierten Video. Der bisherige
+manuelle 9:16-Testexport und die Transkription bleiben verfügbar.
 
 ## Phase 3: Englische Transkription
 
@@ -33,7 +137,7 @@ Transkripte werden atomar erst nach vollständigem Erfolg gespeichert. Bei Fehle
 
 ### Was folgt später?
 
-Phase 3 enthält ausschließlich englische Spracherkennung und Transkriptspeicherung. **KI-Szenenerkennung, Ranking und automatische Auswahl der fünf besten Clips gehören zu Phase 4/5.** Der manuelle Testclip-Export aus Phase 2 bleibt vollständig nutzbar.
+Phase 4 ergänzt lokale Szenenerkennung und Ranking (siehe oben). Fertigstellung und Stapel-Export der fünf ausgewählten Clips folgen später. Der manuelle Testclip-Export aus Phase 2 bleibt vollständig nutzbar.
 
 ## Was funktioniert außerdem?
 
@@ -43,11 +147,11 @@ Phase 3 enthält ausschließlich englische Spracherkennung und Transkriptspeiche
 - MP4 mit **H.264 und AAC**, Originalton bleibt erhalten; eine stumme Quelle bleibt stumm.
 - Fortschrittsanzeige, Abbruch und automatische Prüfung vor der Erfolgsmeldung.
 
-**Später:** automatische Auswahl der fünf besten Szenen, intelligentes Reframing, englische Untertitel, fünf Exporte in einem Durchlauf und Link-Import. In Phase 2 wählst du zum Testen einen einzelnen Abschnitt aus. Der Button „5 Clips erstellen“ bleibt deaktiviert.
+**Später:** intelligentes Reframing, englische Untertitel, Stapel-Export und Link-Import. Der Button „5 Clips erstellen“ bleibt deaktiviert.
 
 ## Installieren – ohne Terminal
 
-1. Öffne [GitHub Actions](https://github.com/bestclipper/AI-Clipper/actions) und den neuesten erfolgreichen Lauf von **Validate and build macOS ARM64** (auch der neue Phase-2-Pull-Request hat eigene Läufe).
+1. Öffne [GitHub Actions](https://github.com/bestclipper/AI-Clipper/actions) und den neuesten erfolgreichen Lauf von **Validate and build macOS ARM64** (der Phase-4-Pull-Request hat eigene Läufe).
 2. Lade **AI-Clipper-macOS-ARM64** unter **Artifacts** herunter. GitHub-Anmeldung erforderlich; Downloads bleiben 14 Tage verfügbar.
 3. Entpacke das ZIP im Finder, öffne die DMG und ziehe **AI Clipper** nach **Programme**. Beende eine ältere Version, bevor du sie ersetzt.
 4. Starte AI Clipper. Du brauchst **keine separate FFmpeg-, Homebrew-, Node- oder Rust-Installation**.

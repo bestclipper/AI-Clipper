@@ -1,4 +1,5 @@
-/** Contract for future automatic workers. Phase 2 exports one manually selected test clip. */
+import type { Candidate } from "./analysis";
+/** Multipart contract shared with Phase 4; automatic rendering follows later. */
 export const OUTPUT_PROFILE = Object.freeze({
   count: 5,
   minSeconds: 61,
@@ -10,12 +11,7 @@ export const OUTPUT_PROFILE = Object.freeze({
 } as const);
 export type PipelineStage =
   "transcription" | "ranking" | "reframing" | "subtitles" | "export";
-export interface ClipCandidate {
-  startSeconds: number;
-  endSeconds: number;
-  score: number;
-  reason: string;
-}
+export type ClipCandidate = Candidate;
 export interface LocalPipeline {
   analyze(sourcePath: string, signal: AbortSignal): Promise<ClipCandidate[]>;
   export(

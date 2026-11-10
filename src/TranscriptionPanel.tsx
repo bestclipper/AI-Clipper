@@ -10,6 +10,7 @@ import {
 } from "./transcription";
 interface Props {
   sourcePath?: string;
+  refresh?: number;
   hasAudio?: boolean;
   otherBusy: boolean;
   onBusy: (value: boolean) => void;
@@ -17,6 +18,7 @@ interface Props {
 }
 export default function TranscriptionPanel({
   sourcePath,
+  refresh,
   hasAudio,
   otherBusy,
   onBusy,
@@ -64,7 +66,7 @@ export default function TranscriptionPanel({
     return () => {
       alive = false;
     };
-  }, [sourcePath, native]);
+  }, [sourcePath, native, refresh]);
   async function execute(download: boolean) {
     if (active || otherBusy) return;
     const job = ++generation.current;
@@ -343,8 +345,9 @@ export default function TranscriptionPanel({
           Einmaliger kostenloser Modell-Download. Danach offline nutzbar. Pro
           Vorgang läuft nur ein Modellprozess; Audio wird in Abschnitten von
           höchstens fünf Minuten verarbeitet. Erneuter Import derselben
-          unveränderten Videodatei stellt das Transkript wieder her. Noch keine
-          Szenenauswahl oder Untertitel-Erstellung.
+          unveränderten Videodatei stellt das Transkript wieder her.
+          Szenenvorschläge findest du unten in der KI-Analyse. Noch keine
+          Untertitel-Erstellung.
         </p>
       </div>
     </section>
